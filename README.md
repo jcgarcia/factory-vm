@@ -26,10 +26,10 @@ sudo pacman -S qemu-system-aarch64 edk2-armvirt
 
 ### One-Liner Installation
 
-Clone and install:
+Clone and install (skips clone if already exists):
 
 ```bash
-git clone https://github.com/jcgarcia/factory-vm.git && cd factory-vm && ./setup-factory-vm.sh --auto
+[ -d factory-vm ] || git clone https://github.com/jcgarcia/factory-vm.git && cd factory-vm && ./setup-factory-vm.sh --auto
 ```
 
 Or in two steps:
