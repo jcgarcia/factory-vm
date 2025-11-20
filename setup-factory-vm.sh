@@ -3673,6 +3673,16 @@ CRED_EOF
     log "  ${GREEN}SSH uses keys only - no password needed for SSH access${NC}"
     log ""
     
+    # Create convenience symlinks in ~/.scripts if it exists (jcscripts integration)
+    if [ -d ~/.scripts ]; then
+        log "Creating convenience symlinks in ~/.scripts..."
+        ln -sf "${VM_DIR}/start-factory.sh" ~/.scripts/factorystart
+        ln -sf "${VM_DIR}/stop-factory.sh" ~/.scripts/factorystop
+        ln -sf "${VM_DIR}/status-factory.sh" ~/.scripts/factorystatus
+        log "  ✓ Created: ${BLUE}factorystart${NC}, ${BLUE}factorystop${NC}, ${BLUE}factorystatus${NC}"
+        log ""
+    fi
+    
     log "${GREEN}✓ Factory VM setup complete!${NC}"
     log ""
     log "Installation time: ${YELLOW}${SETUP_MINUTES} minutes ${SETUP_SECONDS} seconds${NC}"
@@ -3684,8 +3694,8 @@ CRED_EOF
     log "  Jenkins: ${BLUE}https://factory.local${NC}"
     log ""
     log "VM Management:"
-    log "  Stop:   ${BLUE}~/vms/factory/stop-factory.sh${NC}"
-    log "  Status: ${BLUE}~/vms/factory/status-factory.sh${NC}"
+    log "  Scripts: ${BLUE}factorystart${NC}, ${BLUE}factorystop${NC}, ${BLUE}factorystatus${NC}"
+    log "  Or:      ${BLUE}~/vms/factory/start-factory.sh${NC}"
     log ""
 }
 
