@@ -945,11 +945,12 @@ log_info ""
     chown -R 1000:1000 /opt/jenkins
     
     # Skip the initial setup wizard - configure Jenkins automatically
-    echo "  - Configuring Jenkins automation (skip wizard, create users, configure plugins)..."
+    echo -n "  - Configuring Jenkins automation (skip wizard, create users, configure plugins)..."
     mkdir -p /opt/jenkins/init.groovy.d
+    echo " done"
     
     # Create init script to skip setup wizard and create admin user
-    echo "  - Creating init script: 01-basic-security.groovy (admin user)"
+    echo -n "  - Creating init script: 01-basic-security.groovy (admin user)..."
     cat > /opt/jenkins/init.groovy.d/01-basic-security.groovy << 'GROOVY_INIT'
 #!groovy
 import jenkins.model.*
@@ -972,9 +973,10 @@ instance.setAuthorizationStrategy(strategy)
 instance.save()
 println '--> Jenkins basic security configured'
 GROOVY_INIT
+    echo " done"
 
     # Configure executors and disable builds on built-in node
-    echo "  - Creating init script: 02-configure-executors.groovy (disable built-in node)"
+    echo -n "  - Creating init script: 02-configure-executors.groovy (disable built-in node)..."
     cat > /opt/jenkins/init.groovy.d/02-configure-executors.groovy << 'GROOVY_CONFIG'
 #!groovy
 import jenkins.model.Jenkins
@@ -988,6 +990,7 @@ instance.setMode(hudson.model.Node.Mode.EXCLUSIVE)
 instance.save()
 println '--> Built-in node configured (executors disabled - use agents for builds)'
 GROOVY_CONFIG
+    echo " done"
 
     # Note: Agent creation and plugin installation removed to avoid init script errors
     # These features are not essential for initial setup and can be configured later:
@@ -996,7 +999,7 @@ GROOVY_CONFIG
     # This simplification ensures clean installation without dependency issues
 
     # Create foreman user with API token
-    echo "  - Creating init script: 05-create-foreman-user.groovy (foreman user + API token for CLI)"
+    echo -n "  - Creating init script: 05-create-foreman-user.groovy (foreman user + API token for CLI)..."
     cat > /opt/jenkins/init.groovy.d/05-create-foreman-user.groovy << 'GROOVY_FOREMAN'
 #!groovy
 import jenkins.model.Jenkins
@@ -1086,9 +1089,10 @@ if (user == null) {
     }
 }
 GROOVY_FOREMAN
+    echo " done"
 
     # Configure Jenkins URL (fixes the warning about missing Jenkins URL)
-    echo "  - Creating init script: 06-configure-jenkins-url.groovy (set Jenkins URL)"
+    echo -n "  - Creating init script: 06-configure-jenkins-url.groovy (set Jenkins URL)..."
     cat > /opt/jenkins/init.groovy.d/06-configure-jenkins-url.groovy << 'GROOVY_URL'
 #!groovy
 import jenkins.model.Jenkins
@@ -1104,9 +1108,10 @@ location.setAdminAddress("jenkins-admin@factory.local")
 location.save()
 println '--> Jenkins URL configured: https://factory.local/'
 GROOVY_URL
+    echo " done"
 
     # Create a Docker cloud agent (recommended for builds instead of built-in node)
-    echo "  - Creating init script: 07-configure-docker-agent.groovy (Docker cloud for builds)"
+    echo -n "  - Creating init script: 07-configure-docker-agent.groovy (Docker cloud for builds)..."
     cat > /opt/jenkins/init.groovy.d/07-configure-docker-agent.groovy << 'GROOVY_AGENT'
 #!groovy
 import jenkins.model.Jenkins
@@ -1186,9 +1191,10 @@ try {
     println "    You can configure agents manually: Manage Jenkins > Nodes > New Node"
 }
 GROOVY_AGENT
+    echo " done"
 
     # Install essential plugins
-    echo "  - Creating plugins.txt (essential plugins for ARM64 builds)"
+    echo -n "  - Creating plugins.txt (essential plugins for ARM64 builds)..."
     cat > /opt/jenkins/plugins.txt << 'PLUGINS_TXT'
 # Essential Jenkins plugins for Factory VM
 # These will be installed automatically on first Jenkins start
@@ -1234,8 +1240,10 @@ build-timeout:latest
 ws-cleanup:latest
 ansicolor:latest
 PLUGINS_TXT
+    echo " done"
 
     # Jenkins Configuration as Code (JCasC)
+    echo -n "  - Creating jenkins.yaml (Configuration as Code)..."
     cat > /opt/jenkins/jenkins.yaml << 'JENKINS_CONFIG'
 jenkins:
   systemMessage: |
@@ -1318,14 +1326,18 @@ tools:
       - name: "Maven 3"
         home: ""
 JENKINS_CONFIG
+    echo " done"
 
+    echo -n "  - Setting file permissions..."
     chown -R 1000:1000 /opt/jenkins
+    echo " done"
     
     echo "  ✓ Step 1/5 complete: Configuration files created"
     echo ""
     echo "  Step 2/5: Creating Jenkins service init script..."
     
     # Create Jenkins service init script
+    echo -n "  - Creating /etc/init.d/jenkins service..."
     cat > /etc/init.d/jenkins << 'JENKINS_INIT'
 #!/sbin/openrc-run
 
@@ -1391,23 +1403,28 @@ restart() {
     start
 }
 JENKINS_INIT
+    echo " done"
     
+    echo -n "  - Making service executable..."
     chmod +x /etc/init.d/jenkins
+    echo " done"
+    
+    echo -n "  - Adding Jenkins to boot..."
+    rc-update add jenkins default 2>&1 | grep -v "already installed" || true
+    echo " done"
     
     echo "  ✓ Step 2/5 complete: Jenkins service configured"
     echo ""
     
-    # Enable Jenkins to start on boot
-    rc-update add jenkins default
-    
     # Create environment file with passwords for Jenkins container
-    echo "  - Creating Jenkins environment file..."
+    echo -n "  - Creating Jenkins environment file..."
     cat > /opt/jenkins/.env << JENKINS_ENV
 # Jenkins password - used by init.d script
 JENKINS_FOREMAN_PASSWORD=${JENKINS_FOREMAN_PASSWORD}
 JENKINS_ENV
     chmod 600 /opt/jenkins/.env
     chown 1000:1000 /opt/jenkins/.env
+    echo " done"
     
     echo ""
     echo "  Step 3/5: Starting Jenkins container..."
