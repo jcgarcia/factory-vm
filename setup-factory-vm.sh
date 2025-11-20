@@ -2423,6 +2423,41 @@ install_browser_certificates() {
 setup_jenkins_cli() {
     log "Setting up Jenkins CLI on host..."
     
+    # Step 0: Verify Java is installed on host
+    log_info "  Checking for Java on host..."
+    if ! command -v java >/dev/null 2>&1; then
+        log_warning "  Java is not installed on host system"
+        log_info "  Installing default JRE..."
+        
+        # Detect package manager and install Java
+        if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq >/dev/null 2>&1 || true
+            if sudo apt-get install -y default-jre-headless >/dev/null 2>&1; then
+                log_success "  ✓ Java installed via apt-get"
+            else
+                log_warning "  Could not install Java automatically"
+                log_info "  Install Java manually: sudo apt-get install default-jre-headless"
+                log_info "  Then run: ~/vms/factory/setup-jenkins-cli.sh"
+                return 0
+            fi
+        elif command -v dnf >/dev/null 2>&1; then
+            if sudo dnf install -y java-11-openjdk-headless >/dev/null 2>&1; then
+                log_success "  ✓ Java installed via dnf"
+            else
+                log_warning "  Could not install Java automatically"
+                log_info "  Install Java manually: sudo dnf install java-11-openjdk-headless"
+                log_info "  Then run: ~/vms/factory/setup-jenkins-cli.sh"
+                return 0
+            fi
+        else
+            log_warning "  Unknown package manager - cannot auto-install Java"
+            log_info "  Install Java manually, then run: ~/vms/factory/setup-jenkins-cli.sh"
+            return 0
+        fi
+    else
+        log_success "  ✓ Java is installed: $(java -version 2>&1 | head -1)"
+    fi
+    
     # Step 1: Verify Docker is accessible
     log_info "  Verifying Docker access..."
     if ! ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
