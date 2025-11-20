@@ -1,0 +1,17 @@
+# Cache directory - contains downloaded binaries
+# Never commit cached files (hundreds of MB)
+cache/
+
+# Backup files
+*.backup
+*.bak
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*~
+
+# VM-specific files (created during installation, not part of repo)
+vm-setup.sh

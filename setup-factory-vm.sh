@@ -105,7 +105,10 @@ JENKINS_VERSION="lts-jdk21"  # Use LTS with JDK 21
 # Caching Functions
 ################################################################################
 
-CACHE_DIR="${VM_DIR}/cache"
+# Cache directory is in the repository, not VM directory
+# This way it persists across VM rebuilds and git pull updates
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CACHE_DIR="${SCRIPT_DIR}/cache"
 
 download_and_cache_terraform() {
     local version="$1"
