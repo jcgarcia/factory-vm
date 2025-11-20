@@ -1344,11 +1344,16 @@ start() {
     if [ -f /opt/jenkins/plugins.txt ] && [ ! -f /opt/jenkins/.plugins-installed ]; then
         echo "Installing Jenkins plugins from plugins.txt..."
         echo "This may take 3-5 minutes depending on internet speed..."
+        echo "Progress:"
         docker run --rm \
             -v /opt/jenkins:/var/jenkins_home \
             jenkins/jenkins:lts-jdk21 \
             jenkins-plugin-cli --plugin-file /var/jenkins_home/plugins.txt 2>&1 | \
-            grep -E "Downloaded|Installing|Installed|plugin" || true
+            while IFS= read -r line; do
+                if echo "$line" | grep -qE "Downloaded|Installing|Installed|Done|plugin"; then
+                    echo "  $line"
+                fi
+            done
         
         touch /opt/jenkins/.plugins-installed
         echo "Plugins installed successfully"
