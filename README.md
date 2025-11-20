@@ -31,16 +31,15 @@ Installation takes ~15-20 minutes and sets up everything automatically:
 
 ### Access Jenkins
 
-After installation completes:
+After installation completes, check `~/vms/factory/jenkins-credentials.txt` for your auto-generated password.
 
 **Web UI**:
 ```bash
 # Open in browser (will be HTTPS with no warnings)
 https://factory.local
 
-# Login credentials
-Username: admin
-Password: admin123
+# Login credentials are in:
+cat ~/vms/factory/jenkins-credentials.txt
 ```
 
 **CLI** (from host machine):
@@ -71,9 +70,7 @@ ssh factory
 - **Agent**: factory-agent-1 (2 executors, ARM64, Docker, K8s)
 - **Plugins**: 25+ essential plugins pre-installed
 - **SSL**: HTTPS with trusted certificates
-- **Users**: 
-  - `admin` (web UI, password: admin123)
-  - `foreman` (CLI/automation, password: foreman123)
+- **User**: `foreman` (admin role, auto-generated password saved to `~/vms/factory/jenkins-credentials.txt`)
 
 ### Container & Orchestration
 - Docker 25.0.5
@@ -246,16 +243,12 @@ localhost:2222 ─────────────────> SSH :22
 
 ### Users and Credentials
 
-**Jenkins Web UI**:
-- Username: `admin`
-- Password: `admin123`
-- Role: Administrator
-
-**Jenkins CLI**:
+**Jenkins Web UI & CLI**:
 - Username: `foreman`
-- Password: `foreman123`
+- Password: Auto-generated during installation
 - API Token: Auto-generated
 - Token Location: `~/.jenkins-factory-token`
+- Credentials saved to: `~/vms/factory/jenkins-credentials.txt`
 
 **VM SSH**:
 - Username: `foreman`
