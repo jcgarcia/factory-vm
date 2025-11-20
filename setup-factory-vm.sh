@@ -931,11 +931,9 @@ log_info "Installing Jenkins with Java 21..."
 log_info "  This may take 5-10 minutes depending on your internet connection..."
 log_info "  Progress will be shown for each step:"
 log_info "    1. Creating Jenkins configuration files"
-log_info "    2. Installing plugins (25+ plugins, bandwidth intensive)"
-log_info "       Note: Plugin installation happens when VM starts Jenkins service"
-log_info "       This is done inside the VM and may take 3-5 extra minutes"
-log_info "    3. Starting Jenkins container"
-log_info "    4. Waiting for initialization"
+log_info "    2. Starting Jenkins container"
+log_info "    3. Waiting for initialization"
+log_info "    4. Installing plugins (25+ plugins, one-by-one for reliability)"
 log_info "    5. Setting up CLI tools"
 log_info ""
 {
@@ -1334,7 +1332,7 @@ JENKINS_CONFIG
     
     echo "  ✓ Step 1/5 complete: Configuration files created"
     echo ""
-    echo "  Step 2/5: Creating Jenkins service init script..."
+    echo "  Step 2/5: Creating Jenkins service..."
     
     # Create Jenkins service init script
     echo -n "  - Creating /etc/init.d/jenkins service..."
@@ -1352,30 +1350,12 @@ depend() {
 start() {
     ebegin "Starting Jenkins (Java 21)"
     
-    # Install plugins before starting Jenkins
-    if [ -f /opt/jenkins/plugins.txt ] && [ ! -f /opt/jenkins/.plugins-installed ]; then
-        echo "Installing Jenkins plugins from plugins.txt..."
-        echo "This may take 3-5 minutes depending on internet speed..."
-        echo "Progress:"
-        docker run --rm \
-            -v /opt/jenkins:/var/jenkins_home \
-            jenkins/jenkins:lts-jdk21 \
-            jenkins-plugin-cli --plugin-file /var/jenkins_home/plugins.txt 2>&1 | \
-            while IFS= read -r line; do
-                if echo "$line" | grep -qE "Downloaded|Installing|Installed|Done|plugin"; then
-                    echo "  $line"
-                fi
-            done
-        
-        touch /opt/jenkins/.plugins-installed
-        echo "Plugins installed successfully"
-    fi
-    
     # Load passwords from environment file if it exists
     if [ -f /opt/jenkins/.env ]; then
         export $(grep -v '^#' /opt/jenkins/.env | xargs)
     fi
     
+    # Start Jenkins without plugins (plugins will be installed after Jenkins is running)
     docker run -d \
         --name jenkins \
         --restart unless-stopped \
@@ -1413,7 +1393,7 @@ JENKINS_INIT
     rc-update add jenkins default 2>&1 | grep -v "already installed" || true
     echo " done"
     
-    echo "  ✓ Step 2/5 complete: Jenkins service configured"
+    echo "  ✓ Step 2/5 complete: Jenkins service created"
     echo ""
     
     # Create environment file with passwords for Jenkins container
@@ -1428,9 +1408,7 @@ JENKINS_ENV
     
     echo ""
     echo "  Step 3/5: Starting Jenkins container..."
-    echo "  (This will install 25+ plugins - takes 3-5 minutes on slow connections)"
-    echo "  Note: Plugin installation runs inside the VM init.d service"
-    echo "        You won't see detailed progress, but it IS working"
+    echo "  (Plugins will be installed after Jenkins starts)"
     echo ""
     
     # Start Jenkins now
@@ -1467,6 +1445,56 @@ JENKINS_ENV
     
     echo "  ✓ Step 4/5 complete: Jenkins initialized"
     echo ""
+    
+    # Install plugins one-by-one after Jenkins is running
+    echo "  Step 4.5/5: Installing Jenkins plugins..."
+    echo "  - Installing plugins one-by-one for reliability..."
+    
+    # Read plugins from plugins.txt
+    if [ -f /opt/jenkins/plugins.txt ]; then
+        PLUGINS=$(grep -v '^#' /opt/jenkins/plugins.txt | grep -v '^$' | sed 's/:latest$//' | tr '\n' ' ')
+        PLUGIN_COUNT=$(echo "$PLUGINS" | wc -w)
+        PLUGIN_NUM=0
+        
+        echo "  - Total plugins to install: $PLUGIN_COUNT"
+        echo ""
+        
+        for plugin in $PLUGINS; do
+            PLUGIN_NUM=$((PLUGIN_NUM + 1))
+            echo -n "  [$PLUGIN_NUM/$PLUGIN_COUNT] Installing $plugin..."
+            
+            # Install plugin using jenkins-plugin-cli with timeout
+            if timeout 60 docker exec jenkins jenkins-plugin-cli --plugins "$plugin" >/dev/null 2>&1; then
+                echo " ✓"
+            else
+                echo " ⚠ (timeout or failed, will continue)"
+            fi
+        done
+        
+        echo ""
+        echo "  - Restarting Jenkins to activate plugins..."
+        docker restart jenkins >/dev/null 2>&1
+        sleep 10
+        
+        # Wait for Jenkins to come back up
+        echo -n "  - Waiting for Jenkins restart..."
+        for i in {1..30}; do
+            if docker exec jenkins test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
+                echo " ✓"
+                break
+            fi
+            if [ $i -eq 30 ]; then
+                echo " ⚠ (timeout)"
+            fi
+            sleep 2
+        done
+        
+        echo "  ✓ Plugins installed"
+    else
+        echo "  - No plugins.txt found, skipping plugin installation"
+    fi
+    echo ""
+    
     echo "  Step 5/5: Setting up Jenkins CLI..."
     
     # Create agent workspace
