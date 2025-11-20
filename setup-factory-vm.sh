@@ -651,16 +651,32 @@ find_uefi_vars() {
 create_vm_setup_script() {
     log "Creating VM setup script..."
     
+    # Detect latest tool versions before creating script
+    log_info "  Detecting latest tool versions..."
+    TERRAFORM_VERSION=$(get_latest_terraform_version)
+    KUBECTL_VERSION=$(get_latest_kubectl_version)
+    HELM_VERSION=$(get_latest_helm_version)
+    log_info "    Terraform: ${TERRAFORM_VERSION}"
+    log_info "    kubectl: ${KUBECTL_VERSION}"
+    log_info "    Helm: ${HELM_VERSION}"
+    
     local setup_script="${VM_DIR}/vm-setup.sh"
     
-    cat > "$setup_script" << 'SETUP_SCRIPT_EOF'
+    # Note: heredoc WITHOUT quotes allows variable substitution
+    # Use \$ to escape variables that should NOT be substituted
+    cat > "\$setup_script" << SETUP_SCRIPT_EOF
 #!/bin/bash
 # This script runs inside the Factory VM to install all build tools
 # Installs components individually with proper error handling and timeouts
 
+# Tool versions (detected at script creation time)
+TERRAFORM_VERSION="${TERRAFORM_VERSION}"
+KUBECTL_VERSION="${KUBECTL_VERSION}"
+HELM_VERSION="${HELM_VERSION}"
+
 # Security: Jenkins foreman password passed via environment variable
 # Usage: JENKINS_FOREMAN_PASSWORD="secure_password" bash vm-setup.sh
-if [ -z "$JENKINS_FOREMAN_PASSWORD" ]; then
+if [ -z "\$JENKINS_FOREMAN_PASSWORD" ]; then
     echo "ERROR: JENKINS_FOREMAN_PASSWORD environment variable must be set"
     exit 1
 fi
@@ -695,33 +711,33 @@ FAILED_COMPONENTS=()
 SKIPPED_COMPONENTS=()
 
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$INSTALL_LOG"
+    echo -e "\${BLUE}[INFO]\${NC} \$1" | tee -a "\$INSTALL_LOG"
 }
 
 log_success() {
-    echo -e "${GREEN}[✓]${NC} $1" | tee -a "$INSTALL_LOG"
+    echo -e "\${GREEN}[✓]\${NC} \$1" | tee -a "\$INSTALL_LOG"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$INSTALL_LOG"
+    echo -e "\${YELLOW}[WARNING]\${NC} \$1" | tee -a "\$INSTALL_LOG"
 }
 
 log_error() {
-    echo -e "${RED}[✗]${NC} $1" | tee -a "$INSTALL_LOG"
+    echo -e "\${RED}[✗]\${NC} \$1" | tee -a "\$INSTALL_LOG"
 }
 
 echo "╔═══════════════════════════════════════════════════════════╗"
 echo "║        Factory VM Setup - Installing Build Tools          ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo ""
-echo "Installation log: $INSTALL_LOG"
+echo "Installation log: \$INSTALL_LOG"
 echo ""
 
 # Initialize log file
-date > "$INSTALL_LOG"
-echo "Factory VM Build Tools Installation" >> "$INSTALL_LOG"
-echo "=====================================" >> "$INSTALL_LOG"
-echo "" >> "$INSTALL_LOG"
+date > "\$INSTALL_LOG"
+echo "Factory VM Build Tools Installation" >> "\$INSTALL_LOG"
+echo "=====================================" >> "\$INSTALL_LOG"
+echo "" >> "\$INSTALL_LOG"
 
 ################################################################################
 # Component 1: System Update and Base Packages
@@ -756,7 +772,7 @@ log_info "Installing Base Packages..."
         file \
         findutils \
         util-linux
-} >> "$INSTALL_LOG" 2>&1 && log_success "Base Packages installed" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "Base Packages installed" || {
     log_error "Base Packages installation FAILED"
     FAILED_COMPONENTS+=("Base Packages")
 }
@@ -772,7 +788,7 @@ log_info "Installing Docker..."
     rc-update add docker boot
     service docker start || true
     docker --version
-} >> "$INSTALL_LOG" 2>&1 && log_success "Docker installed" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "Docker installed" || {
     log_error "Docker installation FAILED"
     FAILED_COMPONENTS+=("Docker")
 }
@@ -841,7 +857,7 @@ CADDY_CONFIG
     echo "  - HTTPS (port 443) -> proxies to Jenkins (port 8080)"
     echo "  - Uses Caddy's local CA for trusted certificates"
     
-} >> "$INSTALL_LOG" 2>&1 && log_success "Caddy with SSL installed" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "Caddy with SSL installed" || {
     log_error "Caddy installation FAILED"
     FAILED_COMPONENTS+=("Caddy")
 }
@@ -852,20 +868,20 @@ CADDY_CONFIG
 
 log_info "Installing Kubernetes Tools..."
 {
-    echo "Downloading kubectl..."
-    curl -LO "https://dl.k8s.io/release/v1.28.4/bin/linux/arm64/kubectl"
+    echo "Downloading kubectl \${KUBECTL_VERSION}..."
+    curl -LO "https://dl.k8s.io/release/v\${KUBECTL_VERSION}/bin/linux/arm64/kubectl"
     chmod +x kubectl
     mv kubectl /usr/local/bin/
     
-    echo "Downloading Helm..."
-    curl -LO "https://get.helm.sh/helm-v3.13.3-linux-arm64.tar.gz"
-    tar -zxvf helm-v3.13.3-linux-arm64.tar.gz
+    echo "Downloading Helm \${HELM_VERSION}..."
+    curl -LO "https://get.helm.sh/helm-v\${HELM_VERSION}-linux-arm64.tar.gz"
+    tar -zxvf helm-v\${HELM_VERSION}-linux-arm64.tar.gz
     mv linux-arm64/helm /usr/local/bin/
-    rm -rf linux-arm64 helm-v3.13.3-linux-arm64.tar.gz
+    rm -rf linux-arm64 helm-v\${HELM_VERSION}-linux-arm64.tar.gz
     
     kubectl version --client
     helm version
-} >> "$INSTALL_LOG" 2>&1 && log_success "Kubernetes Tools installed" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "Kubernetes Tools installed" || {
     log_error "Kubernetes Tools installation FAILED"
     FAILED_COMPONENTS+=("Kubernetes Tools")
 }
@@ -876,13 +892,13 @@ log_info "Installing Kubernetes Tools..."
 
 log_info "Installing Terraform..."
 {
-    echo "Downloading Terraform..."
-    curl -LO "https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_arm64.zip"
-    unzip terraform_1.6.6_linux_arm64.zip
+    echo "Downloading Terraform \${TERRAFORM_VERSION}..."
+    curl -LO "https://releases.hashicorp.com/terraform/\${TERRAFORM_VERSION}/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip"
+    unzip terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
     mv terraform /usr/local/bin/
-    rm terraform_1.6.6_linux_arm64.zip
+    rm terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
     terraform version
-} >> "$INSTALL_LOG" 2>&1 && log_success "Terraform installed" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "Terraform installed" || {
     log_error "Terraform installation FAILED"
     FAILED_COMPONENTS+=("Terraform")
 }
@@ -893,8 +909,8 @@ log_info "Installing Terraform..."
 
 log_info "Skipping Ansible (optional - can be installed manually later)"
 SKIPPED_COMPONENTS+=("Ansible")
-echo "  Note: To install Ansible later, run:" >> "$INSTALL_LOG"
-echo "    pip3 install --break-system-packages ansible boto3 botocore" >> "$INSTALL_LOG"
+echo "  Note: To install Ansible later, run:" >> "\$INSTALL_LOG"
+echo "    pip3 install --break-system-packages ansible boto3 botocore" >> "\$INSTALL_LOG"
 
 ################################################################################
 # Component 6: AWS CLI
@@ -905,7 +921,7 @@ log_info "Installing AWS CLI..."
     echo "Installing AWS CLI..."
     apk add aws-cli
     aws --version
-} >> "$INSTALL_LOG" 2>&1 && log_success "AWS CLI installed" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "AWS CLI installed" || {
     log_error "AWS CLI installation FAILED"
     FAILED_COMPONENTS+=("AWS CLI")
 }
@@ -927,17 +943,17 @@ log_info "Installing jcscripts..."
 # AWS SSO Login Helper - SSH Compatible
 
 set -e
-PROFILE="${1:-default}"
+PROFILE="\${1:-default}"
 
-if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_CLIENT" ]; then
+if [ -n "\$SSH_CONNECTION" ] || [ -n "\$SSH_CLIENT" ]; then
     echo "AWS SSO Login - SSH Mode"
     echo "Browser cannot be launched automatically."
     echo "Copy the URL below and open it on your local machine."
-    aws sso login --profile "$PROFILE" --no-browser
+    aws sso login --profile "\$PROFILE" --no-browser
 else
-    aws sso login --profile "$PROFILE"
+    aws sso login --profile "\$PROFILE"
 fi
-echo "✓ AWS SSO login successful for profile: $PROFILE"
+echo "✓ AWS SSO login successful for profile: \$PROFILE"
 AWSLOGIN_EOF
     chmod +x awslogin
     
@@ -946,7 +962,7 @@ AWSLOGIN_EOF
     if ! grep -q ".scripts" /home/foreman/.profile 2>/dev/null; then
         echo "" >> /home/foreman/.profile
         echo "# Add jcscripts to PATH" >> /home/foreman/.profile
-        echo 'export PATH="$HOME/.scripts:$PATH"' >> /home/foreman/.profile
+        echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.profile
     fi
     
     # Also add to .bashrc (for interactive bash shells)
@@ -954,7 +970,7 @@ AWSLOGIN_EOF
         if ! grep -q ".scripts" /home/foreman/.bashrc; then
             echo "" >> /home/foreman/.bashrc
             echo "# Add jcscripts to PATH" >> /home/foreman/.bashrc
-            echo 'export PATH="$HOME/.scripts:$PATH"' >> /home/foreman/.bashrc
+            echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.bashrc
         fi
     fi
     
@@ -963,7 +979,7 @@ AWSLOGIN_EOF
     # Configure AWS directory
     mkdir -p /home/foreman/.aws
     chown -R foreman:foreman /home/foreman/.aws
-} >> "$INSTALL_LOG" 2>&1 && log_success "jcscripts installed" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "jcscripts installed" || {
     log_error "jcscripts installation FAILED"
     FAILED_COMPONENTS+=("jcscripts")
 }
@@ -1108,7 +1124,7 @@ if (user == null) {
     println "    Username: foreman"
     println "    Password: (securely configured)"
     println "    API Token saved to: /var/jenkins_home/foreman-api-token.txt"
-    println "    API Token: ${tokenValue}"
+    println "    API Token: \${tokenValue}"
     println "    Token saved to: /var/jenkins_home/foreman-api-token.txt"
     
     user.save()  // Save user to persist the API token
@@ -1131,7 +1147,7 @@ if (user == null) {
         def tokenValue = result.plainValue
         tokenFile.text = tokenValue
         
-        println "    New API Token: ${tokenValue}"
+        println "    New API Token: \${tokenValue}"
         println "    Token saved to: /var/jenkins_home/foreman-api-token.txt"
         
         user.save()
@@ -1238,7 +1254,7 @@ try {
     println "    This is normal on first install - plugins install after init scripts run"
     println "    Agent will be configured automatically on next restart"
 } catch (Exception e) {
-    println "    WARNING: Error configuring Docker agent: ${e.message}"
+    println "    WARNING: Error configuring Docker agent: \${e.message}"
     println "    You can configure agents manually: Manage Jenkins > Nodes > New Node"
 }
 GROOVY_AGENT
@@ -1405,7 +1421,7 @@ start() {
     
     # Load passwords from environment file if it exists
     if [ -f /opt/jenkins/.env ]; then
-        export $(grep -v '^#' /opt/jenkins/.env | xargs)
+        export \$(grep -v '^#' /opt/jenkins/.env | xargs)
     fi
     
     # Pull Jenkins image first (with progress visibility)
@@ -1422,7 +1438,7 @@ start() {
         -v /var/run/docker.sock:/var/run/docker.sock \
         -e JAVA_OPTS="-Djenkins.install.runSetupWizard=false -Xmx2g" \
         -e CASC_JENKINS_CONFIG=/var/jenkins_home/jenkins.yaml \
-        -e JENKINS_FOREMAN_PASSWORD="$JENKINS_FOREMAN_PASSWORD" \
+        -e JENKINS_FOREMAN_PASSWORD="\$JENKINS_FOREMAN_PASSWORD" \
         jenkins/jenkins:lts-jdk21
     eend \$?
 }
@@ -1457,7 +1473,7 @@ JENKINS_INIT
     echo -n "  - Creating Jenkins environment file..."
     cat > /opt/jenkins/.env << JENKINS_ENV
 # Jenkins password - used by init.d script
-JENKINS_FOREMAN_PASSWORD=${JENKINS_FOREMAN_PASSWORD}
+JENKINS_FOREMAN_PASSWORD=\${JENKINS_FOREMAN_PASSWORD}
 JENKINS_ENV
     chmod 600 /opt/jenkins/.env
     chown 1000:1000 /opt/jenkins/.env
@@ -1479,21 +1495,21 @@ JENKINS_ENV
     # Wait for Jenkins to be ready (with timeout)
     echo "  - Waiting for Jenkins to initialize..."
     echo "    (This takes 2-3 minutes: starting container, loading plugins, running init scripts)"
-    START_TIME=$(date +%s)
+    START_TIME=\$(date +%s)
     echo -n "    Progress: "
     for i in {1..90}; do
         if docker exec jenkins test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
-            ELAPSED=$(($(date +%s) - START_TIME))
+            ELAPSED=\$((\$(date +%s) - START_TIME))
             echo ""
-            echo "  ✓ Jenkins is ready! (took ${ELAPSED} seconds)"
+            echo "  ✓ Jenkins is ready! (took \${ELAPSED} seconds)"
             break
         fi
-        if [ $i -eq 90 ]; then
+        if [ \$i -eq 90 ]; then
             echo ""
             echo "  ⚠ Jenkins initialization timed out (may still be starting in background)"
         fi
         # Show progress dot every 5 seconds
-        if [ $((i % 5)) -eq 0 ]; then
+        if [ \$((i % 5)) -eq 0 ]; then
             echo -n "."
         fi
         sleep 2
@@ -1509,19 +1525,19 @@ JENKINS_ENV
     
     # Read plugins from plugins.txt
     if [ -f /opt/jenkins/plugins.txt ]; then
-        PLUGINS=$(grep -v '^#' /opt/jenkins/plugins.txt | grep -v '^$' | sed 's/:latest$//' | tr '\n' ' ')
-        PLUGIN_COUNT=$(echo "$PLUGINS" | wc -w)
+        PLUGINS=\$(grep -v '^#' /opt/jenkins/plugins.txt | grep -v '^\$' | sed 's/:latest\$//' | tr '\n' ' ')
+        PLUGIN_COUNT=\$(echo "\$PLUGINS" | wc -w)
         PLUGIN_NUM=0
         
-        echo "  - Total plugins to install: $PLUGIN_COUNT"
+        echo "  - Total plugins to install: \$PLUGIN_COUNT"
         echo ""
         
-        for plugin in $PLUGINS; do
-            PLUGIN_NUM=$((PLUGIN_NUM + 1))
-            echo -n "  [$PLUGIN_NUM/$PLUGIN_COUNT] Installing $plugin..."
+        for plugin in \$PLUGINS; do
+            PLUGIN_NUM=\$((PLUGIN_NUM + 1))
+            echo -n "  [\$PLUGIN_NUM/\$PLUGIN_COUNT] Installing \$plugin..."
             
             # Install plugin using jenkins-plugin-cli with timeout
-            if timeout 60 docker exec jenkins jenkins-plugin-cli --plugins "$plugin" >/dev/null 2>&1; then
+            if timeout 60 docker exec jenkins jenkins-plugin-cli --plugins "\$plugin" >/dev/null 2>&1; then
                 echo " ✓"
             else
                 echo " ⚠ (timeout or failed, will continue)"
@@ -1540,7 +1556,7 @@ JENKINS_ENV
                 echo " ✓"
                 break
             fi
-            if [ $i -eq 30 ]; then
+            if [ \$i -eq 30 ]; then
                 echo " ⚠ (timeout)"
             fi
             sleep 2
@@ -1573,12 +1589,12 @@ JENKINS_ENV
             echo "  ✓ Jenkins CLI jar downloaded successfully"
             break
         fi
-        if [ $i -eq 30 ]; then
+        if [ \$i -eq 30 ]; then
             echo ""
             echo "  ⚠ Jenkins CLI jar download timed out (will be available later)"
         fi
         # Show progress dot every 5 seconds
-        if [ $((i % 5)) -eq 0 ]; then
+        if [ \$((i % 5)) -eq 0 ]; then
             echo -n "."
         fi
         sleep 2
@@ -1593,12 +1609,12 @@ jenkins-factory() {
     
     # Get token from Jenkins container (use sudo if needed)
     if docker ps >/dev/null 2>&1; then
-        api_token=$(docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
+        api_token=\$(docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
     else
-        api_token=$(sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
+        api_token=\$(sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
     fi
     
-    if [ -z "$api_token" ]; then
+    if [ -z "\$api_token" ]; then
         echo "Error: Could not retrieve API token from Jenkins" >&2
         return 1
     fi
@@ -1606,9 +1622,9 @@ jenkins-factory() {
     # Call Jenkins CLI with token directly in auth parameter (not via stdin)
     java -jar /usr/local/share/jenkins/jenkins-cli.jar \
         -s https://factory.local \
-        -auth foreman:"$api_token" \
+        -auth foreman:"\$api_token" \
         -webSocket \
-        "$@"
+        "\$@"
 }
 JENKINS_CLI_PROFILE
     chmod +x /etc/profile.d/jenkins-cli.sh
@@ -1637,7 +1653,7 @@ JENKINS_CLI_PROFILE
     echo "  - Java 21 support until: September 2029"
     echo ""
     
-} >> "$INSTALL_LOG" 2>&1 && log_success "Jenkins installed and configured" || {
+} >> "\$INSTALL_LOG" 2>&1 && log_success "Jenkins installed and configured" || {
     log_error "Jenkins installation FAILED"
     FAILED_COMPONENTS+=("Jenkins")
 }
@@ -1658,30 +1674,30 @@ echo ""
 
 # Function to safely get version
 get_version() {
-    local cmd="$1"
-    local version_arg="${2:---version}"
-    if command -v "$cmd" >/dev/null 2>&1; then
-        $cmd $version_arg 2>&1 | head -1 || echo "installed (version check failed)"
+    local cmd="\$1"
+    local version_arg="\${2:---version}"
+    if command -v "\$cmd" >/dev/null 2>&1; then
+        \$cmd \$version_arg 2>&1 | head -1 || echo "installed (version check failed)"
     else
         echo "NOT INSTALLED"
     fi
 }
 
 echo "Installed Tools:"
-echo "  Docker:     $(get_version docker --version)"
-echo "  kubectl:    $(get_version kubectl version --client=true --short=true)"
-echo "  Helm:       $(get_version helm version --short)"
-echo "  Terraform:  $(get_version terraform version | head -1)"
-echo "  AWS CLI:    $(get_version aws --version)"
+echo "  Docker:     \$(get_version docker --version)"
+echo "  kubectl:    \$(get_version kubectl version --client=true --short=true)"
+echo "  Helm:       \$(get_version helm version --short)"
+echo "  Terraform:  \$(get_version terraform version | head -1)"
+echo "  AWS CLI:    \$(get_version aws --version)"
 echo "  Jenkins:    Configured and running (https://factory.local)"
 echo "              User: foreman (password shown at end of installation)"
 echo ""
 
 # Show any failed components
-if [ ${#FAILED_COMPONENTS[@]} -gt 0 ]; then
+if [ \${#FAILED_COMPONENTS[@]} -gt 0 ]; then
     log_warning "Some components failed to install:"
-    for comp in "${FAILED_COMPONENTS[@]}"; do
-        echo "  - $comp"
+    for comp in "\${FAILED_COMPONENTS[@]}"; do
+        echo "  - \$comp"
     done
     echo ""
     log_info "You can retry failed components manually or continue without them"
@@ -1689,17 +1705,17 @@ if [ ${#FAILED_COMPONENTS[@]} -gt 0 ]; then
 fi
 
 # Show skipped components
-if [ ${#SKIPPED_COMPONENTS[@]} -gt 0 ]; then
+if [ \${#SKIPPED_COMPONENTS[@]} -gt 0 ]; then
     log_info "Skipped components (optional):"
-    for comp in "${SKIPPED_COMPONENTS[@]}"; do
-        echo "  - $comp"
+    for comp in "\${SKIPPED_COMPONENTS[@]}"; do
+        echo "  - \$comp"
     done
     echo ""
 fi
 
 echo "✓ Factory VM build tools installation completed!"
 echo ""
-echo "Installation log saved to: $INSTALL_LOG"
+echo "Installation log saved to: \$INSTALL_LOG"
 echo ""
 SETUP_SCRIPT_EOF
 
