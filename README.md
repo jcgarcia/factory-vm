@@ -4,9 +4,18 @@
 
 ## 🚀 Quick Start
 
-### One-Command Installation
+### One-Liner Installation
+
+Clone and run with a single command:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/jcgarcia/factory-vm/main/setup-factory-vm.sh | bash -s -- --auto
+```
+
+Or clone first, then run:
+
+```bash
+git clone https://github.com/jcgarcia/factory-vm.git
 cd factory-vm
 ./setup-factory-vm.sh --auto
 ```
