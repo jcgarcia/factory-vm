@@ -101,6 +101,106 @@ KUBECTL_VERSION=""
 HELM_VERSION=""
 JENKINS_VERSION="lts-jdk21"  # Use LTS with JDK 21
 
+################################################################################
+# Caching Functions
+################################################################################
+
+CACHE_DIR="${VM_DIR}/cache"
+
+download_and_cache_terraform() {
+    local version="$1"
+    local cache_file="${CACHE_DIR}/terraform/terraform_${version}_linux_arm64.zip"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "Terraform ${version} already cached"
+        return 0
+    fi
+    
+    log_info "Downloading Terraform ${version}..."
+    mkdir -p "${CACHE_DIR}/terraform"
+    if curl -sL "https://releases.hashicorp.com/terraform/${version}/terraform_${version}_linux_arm64.zip" \
+        -o "$cache_file"; then
+        log_success "Terraform ${version} cached"
+    else
+        log_error "Failed to download Terraform"
+        return 1
+    fi
+}
+
+download_and_cache_kubectl() {
+    local version="$1"
+    local cache_file="${CACHE_DIR}/kubectl/kubectl_${version}"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "kubectl ${version} already cached"
+        return 0
+    fi
+    
+    log_info "Downloading kubectl ${version}..."
+    mkdir -p "${CACHE_DIR}/kubectl"
+    if curl -sL "https://dl.k8s.io/release/v${version}/bin/linux/arm64/kubectl" \
+        -o "$cache_file"; then
+        chmod +x "$cache_file"
+        log_success "kubectl ${version} cached"
+    else
+        log_error "Failed to download kubectl"
+        return 1
+    fi
+}
+
+download_and_cache_helm() {
+    local version="$1"
+    local cache_file="${CACHE_DIR}/helm/helm-v${version}-linux-arm64.tar.gz"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "Helm ${version} already cached"
+        return 0
+    fi
+    
+    log_info "Downloading Helm ${version}..."
+    mkdir -p "${CACHE_DIR}/helm"
+    if curl -sL "https://get.helm.sh/helm-v${version}-linux-arm64.tar.gz" \
+        -o "$cache_file"; then
+        log_success "Helm ${version} cached"
+    else
+        log_error "Failed to download Helm"
+        return 1
+    fi
+}
+
+cache_all_tools() {
+    log "Downloading and caching installation files..."
+    log_info "First-time downloads will be cached for faster subsequent installations"
+    echo ""
+    
+    # Detect versions
+    TERRAFORM_VERSION=$(get_latest_terraform_version)
+    KUBECTL_VERSION=$(get_latest_kubectl_version)
+    HELM_VERSION=$(get_latest_helm_version)
+    
+    log_info "Tool versions detected:"
+    log_info "  Terraform: ${TERRAFORM_VERSION}"
+    log_info "  kubectl: ${KUBECTL_VERSION}"
+    log_info "  Helm: ${HELM_VERSION}"
+    echo ""
+    
+    # Download in parallel (background jobs)
+    download_and_cache_terraform "$TERRAFORM_VERSION" &
+    local terraform_pid=$!
+    download_and_cache_kubectl "$KUBECTL_VERSION" &
+    local kubectl_pid=$!
+    download_and_cache_helm "$HELM_VERSION" &
+    local helm_pid=$!
+    
+    # Wait for parallel downloads
+    wait $terraform_pid
+    wait $kubectl_pid
+    wait $helm_pid
+    
+    log_success "All tools cached and ready for installation"
+    echo ""
+}
+
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -868,16 +968,31 @@ CADDY_CONFIG
 
 log_info "Installing Kubernetes Tools..."
 {
-    echo "Downloading kubectl \${KUBECTL_VERSION}..."
-    curl -LO "https://dl.k8s.io/release/v\${KUBECTL_VERSION}/bin/linux/arm64/kubectl"
-    chmod +x kubectl
-    mv kubectl /usr/local/bin/
+    # Try to use cached kubectl first, fallback to download
+    if [ -f /tmp/kubectl ]; then
+        echo "Using cached kubectl \${KUBECTL_VERSION}..."
+        mv /tmp/kubectl /usr/local/bin/
+        chmod +x /usr/local/bin/kubectl
+    else
+        echo "Downloading kubectl \${KUBECTL_VERSION}..."
+        curl -LO "https://dl.k8s.io/release/v\${KUBECTL_VERSION}/bin/linux/arm64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+    fi
     
-    echo "Downloading Helm \${HELM_VERSION}..."
-    curl -LO "https://get.helm.sh/helm-v\${HELM_VERSION}-linux-arm64.tar.gz"
-    tar -zxvf helm-v\${HELM_VERSION}-linux-arm64.tar.gz
-    mv linux-arm64/helm /usr/local/bin/
-    rm -rf linux-arm64 helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+    # Try to use cached Helm first, fallback to download
+    if [ -f /tmp/helm-v\${HELM_VERSION}-linux-arm64.tar.gz ]; then
+        echo "Using cached Helm \${HELM_VERSION}..."
+        tar -zxf /tmp/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+        mv linux-arm64/helm /usr/local/bin/
+        rm -rf linux-arm64 /tmp/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+    else
+        echo "Downloading Helm \${HELM_VERSION}..."
+        curl -LO "https://get.helm.sh/helm-v\${HELM_VERSION}-linux-arm64.tar.gz"
+        tar -zxvf helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+        mv linux-arm64/helm /usr/local/bin/
+        rm -rf linux-arm64 helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+    fi
     
     kubectl version --client
     helm version
@@ -892,11 +1007,19 @@ log_info "Installing Kubernetes Tools..."
 
 log_info "Installing Terraform..."
 {
-    echo "Downloading Terraform \${TERRAFORM_VERSION}..."
-    curl -LO "https://releases.hashicorp.com/terraform/\${TERRAFORM_VERSION}/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip"
-    unzip terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
-    mv terraform /usr/local/bin/
-    rm terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
+    # Try to use cached Terraform first, fallback to download
+    if [ -f /tmp/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip ]; then
+        echo "Using cached Terraform \${TERRAFORM_VERSION}..."
+        unzip -q /tmp/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip -d /tmp/
+        mv /tmp/terraform /usr/local/bin/
+        rm /tmp/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
+    else
+        echo "Downloading Terraform \${TERRAFORM_VERSION}..."
+        curl -LO "https://releases.hashicorp.com/terraform/\${TERRAFORM_VERSION}/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip"
+        unzip terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
+        mv terraform /usr/local/bin/
+        rm terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
+    fi
     terraform version
 } >> "\$INSTALL_LOG" 2>&1 && log_success "Terraform installed" || {
     log_error "Terraform installation FAILED"
@@ -1960,6 +2083,18 @@ EOF
     log_info "Each component has individual timeouts to handle slow network connections"
     log_info "Installation will continue even if some optional components fail"
     log ""
+    
+    # Copy cached tool files to VM first
+    log_info "Copying cached installation files to VM..."
+    scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" \
+        root@localhost:/tmp/ 2>/dev/null || log_warning "Terraform cache copy failed (will download in VM)"
+    scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" \
+        root@localhost:/tmp/kubectl 2>/dev/null || log_warning "kubectl cache copy failed (will download in VM)"
+    scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
+        root@localhost:/tmp/ 2>/dev/null || log_warning "Helm cache copy failed (will download in VM)"
     
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${VM_DIR}/vm-setup.sh" root@localhost:/tmp/
@@ -3594,6 +3729,7 @@ BANNER
     setup_ssh_keys
     download_alpine
     create_disks
+    cache_all_tools
     create_vm_setup_script
     
     # Install Alpine
