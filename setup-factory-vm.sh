@@ -171,6 +171,47 @@ download_and_cache_helm() {
     fi
 }
 
+download_and_cache_awscli() {
+    local cache_file="${CACHE_DIR}/awscli/awscli-latest-aarch64.zip"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "AWS CLI already cached"
+        return 0
+    fi
+    
+    log_info "Downloading AWS CLI v2..."
+    mkdir -p "${CACHE_DIR}/awscli"
+    if curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" \
+        -o "$cache_file"; then
+        log_success "AWS CLI cached"
+    else
+        log_error "Failed to download AWS CLI"
+        return 1
+    fi
+}
+
+download_and_cache_ansible() {
+    local cache_file="${CACHE_DIR}/ansible/ansible-requirements.txt"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "Ansible requirements already cached"
+        return 0
+    fi
+    
+    log_info "Creating Ansible requirements file..."
+    mkdir -p "${CACHE_DIR}/ansible"
+    
+    # Create a requirements file for pip to cache
+    cat > "$cache_file" << 'EOF'
+ansible>=2.16
+boto3>=1.34
+botocore>=1.34
+EOF
+    
+    log_success "Ansible requirements cached"
+    return 0
+}
+
 cache_all_tools() {
     log "Downloading and caching installation files..."
     log_info "First-time downloads will be cached for faster subsequent installations"
@@ -194,11 +235,17 @@ cache_all_tools() {
     local kubectl_pid=$!
     download_and_cache_helm "$HELM_VERSION" &
     local helm_pid=$!
+    download_and_cache_awscli &
+    local awscli_pid=$!
+    download_and_cache_ansible &
+    local ansible_pid=$!
     
     # Wait for parallel downloads
     wait $terraform_pid
     wait $kubectl_pid
     wait $helm_pid
+    wait $awscli_pid
+    wait $ansible_pid
     
     log_success "All tools cached and ready for installation"
     echo ""
@@ -432,9 +479,17 @@ install_aws_cli_via_ssh() {
     log "  Component 5/9: AWS CLI"
     log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    log_info "Installing AWS CLI v2..."
-    ssh_exec "apk add --no-cache python3 py3-pip"
-    ssh_exec "pip3 install --break-system-packages awscli"
+    local cache_file="${CACHE_DIR}/awscli/awscli-latest-aarch64.zip"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "Installing AWS CLI from cache..."
+        scp -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -P "$VM_SSH_PORT" "$cache_file" root@localhost:/tmp/awscli.zip
+        ssh_exec "cd /tmp && unzip -q awscli.zip && ./aws/install && rm -rf /tmp/aws /tmp/awscli.zip"
+    else
+        log_info "Installing AWS CLI from Alpine packages (no cache found)..."
+        ssh_exec "apk add --no-cache aws-cli"
+    fi
     
     log_success "AWS CLI installed"
 }
@@ -1236,9 +1291,9 @@ CADDY_CONFIG
 log_info "Installing Kubernetes Tools..."
 {
     # Try to use cached kubectl first, fallback to download
-    if [ -f /tmp/kubectl ]; then
+    if [ -f /tmp/cache/kubectl/kubectl ]; then
         echo "Using cached kubectl \${KUBECTL_VERSION}..."
-        mv /tmp/kubectl /usr/local/bin/
+        cp /tmp/cache/kubectl/kubectl /usr/local/bin/
         chmod +x /usr/local/bin/kubectl
     else
         echo "Downloading kubectl \${KUBECTL_VERSION}..."
@@ -1248,11 +1303,11 @@ log_info "Installing Kubernetes Tools..."
     fi
     
     # Try to use cached Helm first, fallback to download
-    if [ -f /tmp/helm-v\${HELM_VERSION}-linux-arm64.tar.gz ]; then
+    if [ -f /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz ]; then
         echo "Using cached Helm \${HELM_VERSION}..."
-        tar -zxf /tmp/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+        tar -zxf /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
         mv linux-arm64/helm /usr/local/bin/
-        rm -rf linux-arm64 /tmp/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+        rm -rf linux-arm64
     else
         echo "Downloading Helm \${HELM_VERSION}..."
         curl -LO "https://get.helm.sh/helm-v\${HELM_VERSION}-linux-arm64.tar.gz"
@@ -1275,11 +1330,10 @@ log_info "Installing Kubernetes Tools..."
 log_info "Installing Terraform..."
 {
     # Try to use cached Terraform first, fallback to download
-    if [ -f /tmp/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip ]; then
+    if [ -f /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip ]; then
         echo "Using cached Terraform \${TERRAFORM_VERSION}..."
-        unzip -q /tmp/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip -d /tmp/
+        unzip -q /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip -d /tmp/
         mv /tmp/terraform /usr/local/bin/
-        rm /tmp/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
     else
         echo "Downloading Terraform \${TERRAFORM_VERSION}..."
         curl -LO "https://releases.hashicorp.com/terraform/\${TERRAFORM_VERSION}/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip"
@@ -1301,6 +1355,8 @@ log_info "Skipping Ansible (optional - can be installed manually later)"
 SKIPPED_COMPONENTS+=("Ansible")
 echo "  Note: To install Ansible later, run:" >> "\$INSTALL_LOG"
 echo "    pip3 install --break-system-packages ansible boto3 botocore" >> "\$INSTALL_LOG"
+echo "  Or use cached requirements:" >> "\$INSTALL_LOG"
+echo "    pip3 install --break-system-packages -r /tmp/cache/ansible/ansible-requirements.txt" >> "\$INSTALL_LOG"
 
 ################################################################################
 # Component 6: AWS CLI
@@ -1309,7 +1365,17 @@ echo "    pip3 install --break-system-packages ansible boto3 botocore" >> "\$INS
 log_info "Installing AWS CLI..."
 {
     echo "Installing AWS CLI..."
-    apk add aws-cli
+    # Use cache if available (copied from host)
+    if [ -f "/tmp/cache/awscli/awscli-latest-aarch64.zip" ]; then
+        echo "Installing from cache..."
+        cd /tmp
+        unzip -q /tmp/cache/awscli/awscli-latest-aarch64.zip
+        ./aws/install
+        rm -rf /tmp/aws
+    else
+        echo "Installing from Alpine packages (no cache found)..."
+        apk add aws-cli
+    fi
     aws --version
 } >> "\$INSTALL_LOG" 2>&1 && log_success "AWS CLI installed" || {
     log_error "AWS CLI installation FAILED"
@@ -2331,15 +2397,39 @@ EOF
     
     # Copy cached tool files to VM first
     log_info "Copying cached installation files to VM..."
+    
+    # Create cache directory structure in VM
+    ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" root@localhost "mkdir -p /tmp/cache/{terraform,kubectl,helm,awscli,ansible}" 2>/dev/null || true
+    
+    # Copy terraform
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" \
-        root@localhost:/tmp/ 2>/dev/null || log_warning "Terraform cache copy failed (will download in VM)"
+        root@localhost:/tmp/cache/terraform/ 2>/dev/null || log_warning "Terraform cache copy failed (will download in VM)"
+    
+    # Copy kubectl
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" \
-        root@localhost:/tmp/kubectl 2>/dev/null || log_warning "kubectl cache copy failed (will download in VM)"
+        root@localhost:/tmp/cache/kubectl/kubectl 2>/dev/null || log_warning "kubectl cache copy failed (will download in VM)"
+    
+    # Copy helm
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
-        root@localhost:/tmp/ 2>/dev/null || log_warning "Helm cache copy failed (will download in VM)"
+        root@localhost:/tmp/cache/helm/ 2>/dev/null || log_warning "Helm cache copy failed (will download in VM)"
+    
+    # Copy AWS CLI if cached
+    if [ -f "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" ]; then
+        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" \
+            root@localhost:/tmp/cache/awscli/ 2>/dev/null || log_warning "AWS CLI cache copy failed (will use apk)"
+    fi
+    
+    # Copy Ansible requirements if cached
+    if [ -f "${CACHE_DIR}/ansible/ansible-requirements.txt" ]; then
+        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "${CACHE_DIR}/ansible/ansible-requirements.txt" \
+            root@localhost:/tmp/cache/ansible/ 2>/dev/null || true
+    fi
     
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
     # This is more reliable than copying .hpi files and allows using cached plugins from host
