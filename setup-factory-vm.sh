@@ -1285,116 +1285,111 @@ CADDY_CONFIG
 }
 
 ################################################################################
-# Component 3: Kubernetes Tools
+# Component 3-6: Parallel Installation of Independent Tools
+# These tools don't depend on each other, so we can install them in parallel
+# to speed up the installation process
 ################################################################################
 
-log_info "Installing Kubernetes Tools..."
+log_info "Installing tools in parallel (Kubernetes, Terraform, AWS CLI, jcscripts)..."
+log_info "This speeds up installation by using multiple CPU cores..."
+
+# Component 3: Kubernetes Tools (background)
 {
-    # Try to use cached kubectl first, fallback to download
-    if [ -f /tmp/cache/kubectl/kubectl ]; then
-        echo "Using cached kubectl \${KUBECTL_VERSION}..."
-        cp /tmp/cache/kubectl/kubectl /usr/local/bin/
-        chmod +x /usr/local/bin/kubectl
-    else
-        echo "Downloading kubectl \${KUBECTL_VERSION}..."
-        curl -LO "https://dl.k8s.io/release/v\${KUBECTL_VERSION}/bin/linux/arm64/kubectl"
-        chmod +x kubectl
-        mv kubectl /usr/local/bin/
-    fi
-    
-    # Try to use cached Helm first, fallback to download
-    if [ -f /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz ]; then
-        echo "Using cached Helm \${HELM_VERSION}..."
-        tar -zxf /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
-        mv linux-arm64/helm /usr/local/bin/
-        rm -rf linux-arm64
-    else
-        echo "Downloading Helm \${HELM_VERSION}..."
-        curl -LO "https://get.helm.sh/helm-v\${HELM_VERSION}-linux-arm64.tar.gz"
-        tar -zxvf helm-v\${HELM_VERSION}-linux-arm64.tar.gz
-        mv linux-arm64/helm /usr/local/bin/
-        rm -rf linux-arm64 helm-v\${HELM_VERSION}-linux-arm64.tar.gz
-    fi
-    
-    kubectl version --client
-    helm version
-} >> "\$INSTALL_LOG" 2>&1 && log_success "Kubernetes Tools installed" || {
-    log_error "Kubernetes Tools installation FAILED"
-    FAILED_COMPONENTS+=("Kubernetes Tools")
-}
+    {
+        # Try to use cached kubectl first, fallback to download
+        if [ -f /tmp/cache/kubectl/kubectl ]; then
+            echo "Using cached kubectl \${KUBECTL_VERSION}..."
+            cp /tmp/cache/kubectl/kubectl /usr/local/bin/
+            chmod +x /usr/local/bin/kubectl
+        else
+            echo "Downloading kubectl \${KUBECTL_VERSION}..."
+            curl -LO "https://dl.k8s.io/release/v\${KUBECTL_VERSION}/bin/linux/arm64/kubectl"
+            chmod +x kubectl
+            mv kubectl /usr/local/bin/
+        fi
+        
+        # Try to use cached Helm first, fallback to download
+        if [ -f /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz ]; then
+            echo "Using cached Helm \${HELM_VERSION}..."
+            tar -zxf /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+            mv linux-arm64/helm /usr/local/bin/
+            rm -rf linux-arm64
+        else
+            echo "Downloading Helm \${HELM_VERSION}..."
+            curl -LO "https://get.helm.sh/helm-v\${HELM_VERSION}-linux-arm64.tar.gz"
+            tar -zxvf helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+            mv linux-arm64/helm /usr/local/bin/
+            rm -rf linux-arm64 helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+        fi
+        
+        kubectl version --client
+        helm version
+    } >> "\$INSTALL_LOG" 2>&1 && {
+        echo "KUBERNETES_OK" > /tmp/k8s.status
+    } || {
+        echo "KUBERNETES_FAILED" > /tmp/k8s.status
+    }
+} &
+K8S_PID=\$!
 
-################################################################################
-# Component 4: Terraform
-################################################################################
-
-log_info "Installing Terraform..."
+# Component 4: Terraform (background)
 {
-    # Try to use cached Terraform first, fallback to download
-    if [ -f /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip ]; then
-        echo "Using cached Terraform \${TERRAFORM_VERSION}..."
-        unzip -q /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip -d /tmp/
-        mv /tmp/terraform /usr/local/bin/
-    else
-        echo "Downloading Terraform \${TERRAFORM_VERSION}..."
-        curl -LO "https://releases.hashicorp.com/terraform/\${TERRAFORM_VERSION}/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip"
-        unzip terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
-        mv terraform /usr/local/bin/
-        rm terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
-    fi
-    terraform version
-} >> "\$INSTALL_LOG" 2>&1 && log_success "Terraform installed" || {
-    log_error "Terraform installation FAILED"
-    FAILED_COMPONENTS+=("Terraform")
-}
+    {
+        # Try to use cached Terraform first, fallback to download
+        if [ -f /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip ]; then
+            echo "Using cached Terraform \${TERRAFORM_VERSION}..."
+            unzip -q /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip -d /tmp/
+            mv /tmp/terraform /usr/local/bin/
+        else
+            echo "Downloading Terraform \${TERRAFORM_VERSION}..."
+            curl -LO "https://releases.hashicorp.com/terraform/\${TERRAFORM_VERSION}/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip"
+            unzip terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
+            mv terraform /usr/local/bin/
+            rm terraform_\${TERRAFORM_VERSION}_linux_arm64.zip
+        fi
+        terraform version
+    } >> "\$INSTALL_LOG" 2>&1 && {
+        echo "TERRAFORM_OK" > /tmp/terraform.status
+    } || {
+        echo "TERRAFORM_FAILED" > /tmp/terraform.status
+    }
+} &
+TERRAFORM_PID=\$!
 
-################################################################################
-# Component 5: Ansible (Optional - skipped for speed)
-################################################################################
-
-log_info "Skipping Ansible (optional - can be installed manually later)"
-SKIPPED_COMPONENTS+=("Ansible")
-echo "  Note: To install Ansible later, run:" >> "\$INSTALL_LOG"
-echo "    pip3 install --break-system-packages ansible boto3 botocore" >> "\$INSTALL_LOG"
-echo "  Or use cached requirements:" >> "\$INSTALL_LOG"
-echo "    pip3 install --break-system-packages -r /tmp/cache/ansible/ansible-requirements.txt" >> "\$INSTALL_LOG"
-
-################################################################################
-# Component 6: AWS CLI
-################################################################################
-
-log_info "Installing AWS CLI..."
+# Component 5: AWS CLI (background)
 {
-    echo "Installing AWS CLI..."
-    # Use cache if available (copied from host)
-    if [ -f "/tmp/cache/awscli/awscli-latest-aarch64.zip" ]; then
-        echo "Installing from cache..."
-        cd /tmp
-        unzip -q /tmp/cache/awscli/awscli-latest-aarch64.zip
-        ./aws/install
-        rm -rf /tmp/aws
-    else
-        echo "Installing from Alpine packages (no cache found)..."
-        apk add aws-cli
-    fi
-    aws --version
-} >> "\$INSTALL_LOG" 2>&1 && log_success "AWS CLI installed" || {
-    log_error "AWS CLI installation FAILED"
-    FAILED_COMPONENTS+=("AWS CLI")
-}
+    {
+        echo "Installing AWS CLI..."
+        # Use cache if available (copied from host)
+        if [ -f "/tmp/cache/awscli/awscli-latest-aarch64.zip" ]; then
+            echo "Installing from cache..."
+            cd /tmp
+            unzip -q /tmp/cache/awscli/awscli-latest-aarch64.zip
+            ./aws/install
+            rm -rf /tmp/aws
+        else
+            echo "Installing from Alpine packages (no cache found)..."
+            apk add aws-cli
+        fi
+        aws --version
+    } >> "\$INSTALL_LOG" 2>&1 && {
+        echo "AWSCLI_OK" > /tmp/awscli.status
+    } || {
+        echo "AWSCLI_FAILED" > /tmp/awscli.status
+    }
+} &
+AWSCLI_PID=\$!
 
-################################################################################
-# Component 7: jcscripts (includes awslogin)
-################################################################################
-
-log_info "Installing jcscripts..."
+# Component 6: jcscripts (background)
 {
-    echo "Setting up jcscripts directory..."
-    mkdir -p /home/foreman/.scripts
-    cd /home/foreman/.scripts
-    
-    # Create minimal awslogin script
-    echo "Creating SSH-compatible awslogin script..."
-    cat > awslogin << 'AWSLOGIN_EOF'
+    {
+        echo "Setting up jcscripts directory..."
+        mkdir -p /home/foreman/.scripts
+        cd /home/foreman/.scripts
+        
+        # Create minimal awslogin script
+        echo "Creating SSH-compatible awslogin script..."
+        cat > awslogin << 'AWSLOGIN_EOF'
 #!/bin/bash
 # AWS SSO Login Helper - SSH Compatible
 
@@ -1411,37 +1406,82 @@ else
 fi
 echo "✓ AWS SSO login successful for profile: \$PROFILE"
 AWSLOGIN_EOF
-    chmod +x awslogin
-    
-    # Add to PATH for foreman user - Alpine Linux requires .profile for login shells
-    # Add to .profile (for login shells - ash/sh)
-    if ! grep -q ".scripts" /home/foreman/.profile 2>/dev/null; then
-        echo "" >> /home/foreman/.profile
-        echo "# Add jcscripts to PATH" >> /home/foreman/.profile
-        echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.profile
-    fi
-    
-    # Also add to .bashrc (for interactive bash shells)
-    if [ -f /home/foreman/.bashrc ]; then
-        if ! grep -q ".scripts" /home/foreman/.bashrc; then
-            echo "" >> /home/foreman/.bashrc
-            echo "# Add jcscripts to PATH" >> /home/foreman/.bashrc
-            echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.bashrc
+        chmod +x awslogin
+        
+        # Add to PATH for foreman user - Alpine Linux requires .profile for login shells
+        # Add to .profile (for login shells - ash/sh)
+        if ! grep -q ".scripts" /home/foreman/.profile 2>/dev/null; then
+            echo "" >> /home/foreman/.profile
+            echo "# Add jcscripts to PATH" >> /home/foreman/.profile
+            echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.profile
         fi
-    fi
-    
-    chown -R foreman:foreman /home/foreman/.scripts
-    
-    # Configure AWS directory
-    mkdir -p /home/foreman/.aws
-    chown -R foreman:foreman /home/foreman/.aws
-} >> "\$INSTALL_LOG" 2>&1 && log_success "jcscripts installed" || {
+        
+        # Also add to .bashrc (for interactive bash shells)
+        if [ -f /home/foreman/.bashrc ]; then
+            if ! grep -q ".scripts" /home/foreman/.bashrc; then
+                echo "" >> /home/foreman/.bashrc
+                echo "# Add jcscripts to PATH" >> /home/foreman/.bashrc
+                echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.bashrc
+            fi
+        fi
+        
+        chown -R foreman:foreman /home/foreman/.scripts
+        
+        # Configure AWS directory
+        mkdir -p /home/foreman/.aws
+        chown -R foreman:foreman /home/foreman/.aws
+    } >> "\$INSTALL_LOG" 2>&1 && {
+        echo "JCSCRIPTS_OK" > /tmp/jcscripts.status
+    } || {
+        echo "JCSCRIPTS_FAILED" > /tmp/jcscripts.status
+    }
+} &
+JCSCRIPTS_PID=\$!
+
+# Wait for all parallel installations to complete
+log_info "Waiting for parallel installations to complete..."
+wait \$K8S_PID
+wait \$TERRAFORM_PID
+wait \$AWSCLI_PID
+wait \$JCSCRIPTS_PID
+
+# Check results and report
+[ "\$(cat /tmp/k8s.status 2>/dev/null)" = "KUBERNETES_OK" ] && log_success "Kubernetes Tools installed" || {
+    log_error "Kubernetes Tools installation FAILED"
+    FAILED_COMPONENTS+=("Kubernetes Tools")
+}
+
+[ "\$(cat /tmp/terraform.status 2>/dev/null)" = "TERRAFORM_OK" ] && log_success "Terraform installed" || {
+    log_error "Terraform installation FAILED"
+    FAILED_COMPONENTS+=("Terraform")
+}
+
+[ "\$(cat /tmp/awscli.status 2>/dev/null)" = "AWSCLI_OK" ] && log_success "AWS CLI installed" || {
+    log_error "AWS CLI installation FAILED"
+    FAILED_COMPONENTS+=("AWS CLI")
+}
+
+[ "\$(cat /tmp/jcscripts.status 2>/dev/null)" = "JCSCRIPTS_OK" ] && log_success "jcscripts installed" || {
     log_error "jcscripts installation FAILED"
     FAILED_COMPONENTS+=("jcscripts")
 }
 
+# Cleanup status files
+rm -f /tmp/{k8s,terraform,awscli,jcscripts}.status
+
 ################################################################################
-# Component 8: Android SDK (Optional - skipped for speed)
+# Component 5: Ansible (Optional - skipped for speed)
+################################################################################
+
+log_info "Skipping Ansible (optional - can be installed manually later)"
+SKIPPED_COMPONENTS+=("Ansible")
+echo "  Note: To install Ansible later, run:" >> "\$INSTALL_LOG"
+echo "    pip3 install --break-system-packages ansible boto3 botocore" >> "\$INSTALL_LOG"
+echo "  Or use cached requirements:" >> "\$INSTALL_LOG"
+echo "    pip3 install --break-system-packages -r /tmp/cache/ansible/ansible-requirements.txt" >> "\$INSTALL_LOG"
+
+################################################################################
+# Component 7: Android SDK (Optional - skipped for speed)
 ################################################################################
 
 log_info "Skipping Android SDK (optional - can be installed manually later)"

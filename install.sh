@@ -9,7 +9,7 @@ set -e
 
 REPO_URL="https://github.com/jcgarcia/factory-vm.git"
 REPO_DIR="$HOME/factory-vm"
-BRANCH="${FACTORY_VM_BRANCH:-v2-caching-architecture}"
+BRANCH="${FACTORY_VM_BRANCH:-main}"
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║                                                          ║"
