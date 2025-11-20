@@ -81,17 +81,17 @@ get_latest_alpine_version() {
 # Functions to get latest versions (fallback to known stable versions if detection fails)
 
 get_latest_terraform_version() {
-    local latest=$(curl -s https://api.github.com/repos/hashicorp/terraform/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    local latest=$(curl -sL https://api.github.com/repos/hashicorp/terraform/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
     echo "${latest:-1.6.6}"
 }
 
 get_latest_kubectl_version() {
-    local latest=$(curl -s https://dl.k8s.io/release/stable.txt 2>/dev/null | sed 's/^v//')
+    local latest=$(curl -sL https://dl.k8s.io/release/stable.txt 2>/dev/null | sed 's/^v//')
     echo "${latest:-1.28.4}"
 }
 
 get_latest_helm_version() {
-    local latest=$(curl -s https://api.github.com/repos/helm/helm/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    local latest=$(curl -sL https://api.github.com/repos/helm/helm/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
     echo "${latest:-3.13.3}"
 }
 
