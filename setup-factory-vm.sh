@@ -1967,7 +1967,8 @@ EOF
     # Run setup script WITHOUT outer timeout - script handles its own timeouts per component
     # This allows slow downloads (Android SDK, etc.) to complete without aborting entire install
     # Pass Jenkins foreman password as environment variable (secure - not visible in process list)
-    if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    # Use -tt to force pseudo-terminal allocation for real-time output (no buffering)
+    if ssh -tt -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=60 -o ServerAliveInterval=30 -p "$VM_SSH_PORT" root@localhost \
         "JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}' bash /tmp/vm-setup.sh" ; then
         log "  ✓ Build tools installed successfully"
