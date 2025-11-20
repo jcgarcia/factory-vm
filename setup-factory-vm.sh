@@ -201,6 +201,124 @@ cache_all_tools() {
     echo ""
 }
 
+download_and_cache_plugin() {
+    local plugin_name="$1"
+    local cache_file="${CACHE_DIR}/jenkins/plugins/${plugin_name}.hpi"
+    
+    if [ -f "$cache_file" ]; then
+        return 0  # Already cached, silent success
+    fi
+    
+    mkdir -p "${CACHE_DIR}/jenkins/plugins"
+    
+    # Download plugin using Jenkins update center
+    local download_url="https://updates.jenkins.io/latest/${plugin_name}.hpi"
+    
+    if curl -sL "$download_url" -o "$cache_file" 2>/dev/null; then
+        return 0
+    else
+        rm -f "$cache_file"  # Clean up partial download
+        return 1
+    fi
+}
+
+cache_all_plugins() {
+    log "Downloading and caching Jenkins plugins..."
+    log_info "First-time downloads will be cached for faster subsequent installations"
+    echo ""
+    
+    # Plugin list (from plugins.txt in heredoc)
+    local plugins=(
+        "configuration-as-code"
+        "git"
+        "git-client"
+        "github"
+        "github-branch-source"
+        "docker-plugin"
+        "docker-workflow"
+        "workflow-aggregator"
+        "pipeline-stage-view"
+        "pipeline-github-lib"
+        "blueocean"
+        "credentials"
+        "credentials-binding"
+        "plain-credentials"
+        "ssh-credentials"
+        "aws-credentials"
+        "aws-java-sdk"
+        "gradle"
+        "nodejs"
+        "kubernetes"
+        "kubernetes-cli"
+        "timestamper"
+        "build-timeout"
+        "ws-cleanup"
+        "ansicolor"
+    )
+    
+    local total=${#plugins[@]}
+    local cached=0
+    local downloaded=0
+    local failed=0
+    
+    log_info "Checking cache for ${total} plugins..."
+    echo ""
+    
+    # Download plugins in parallel (5 at a time to avoid overwhelming the server)
+    local batch_size=5
+    local i=0
+    
+    while [ $i -lt $total ]; do
+        local pids=()
+        local batch_plugins=()
+        
+        # Start batch of downloads
+        for j in $(seq 0 $((batch_size - 1))); do
+            local idx=$((i + j))
+            if [ $idx -ge $total ]; then
+                break
+            fi
+            
+            local plugin="${plugins[$idx]}"
+            batch_plugins+=("$plugin")
+            
+            # Check if already cached
+            if [ -f "${CACHE_DIR}/jenkins/plugins/${plugin}.hpi" ]; then
+                ((cached++))
+                echo "  [${idx}/${total}] ${plugin} (cached)"
+            else
+                echo -n "  [${idx}/${total}] ${plugin} (downloading)..."
+                download_and_cache_plugin "$plugin" &
+                pids+=($!)
+            fi
+        done
+        
+        # Wait for batch to complete
+        for pid in "${pids[@]}"; do
+            if wait $pid; then
+                ((downloaded++))
+                echo " ✓"
+            else
+                ((failed++))
+                echo " ✗"
+            fi
+        done
+        
+        i=$((i + batch_size))
+    done
+    
+    echo ""
+    log_info "Plugin cache summary:"
+    log_info "  Already cached: ${cached}"
+    log_info "  Downloaded: ${downloaded}"
+    if [ $failed -gt 0 ]; then
+        log_warning "  Failed: ${failed} (will download inside VM)"
+    fi
+    
+    log_success "Plugins cached and ready for installation"
+    echo ""
+}
+
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -1651,23 +1769,53 @@ JENKINS_ENV
         PLUGINS=\$(grep -v '^#' /opt/jenkins/plugins.txt | grep -v '^\$' | sed 's/:latest\$//' | tr '\n' ' ')
         PLUGIN_COUNT=\$(echo "\$PLUGINS" | wc -w)
         PLUGIN_NUM=0
+        CACHED_COUNT=0
+        DOWNLOAD_COUNT=0
         
         echo "  - Total plugins to install: \$PLUGIN_COUNT"
         echo ""
         
         for plugin in \$PLUGINS; do
             PLUGIN_NUM=\$((PLUGIN_NUM + 1))
-            echo -n "  [\$PLUGIN_NUM/\$PLUGIN_COUNT] Installing \$plugin..."
             
-            # Install plugin using jenkins-plugin-cli with timeout
-            if timeout 60 docker exec jenkins jenkins-plugin-cli --plugins "\$plugin" >/dev/null 2>&1; then
-                echo " ✓"
+            # Check if plugin is cached in /tmp
+            if [ -f "/tmp/\${plugin}.hpi" ]; then
+                echo -n "  [\$PLUGIN_NUM/\$PLUGIN_COUNT] Installing \$plugin (from cache)..."
+                CACHED_COUNT=\$((CACHED_COUNT + 1))
+                
+                # Copy cached plugin to Jenkins plugins directory
+                if cp "/tmp/\${plugin}.hpi" /opt/jenkins/home/plugins/"\${plugin}.hpi" 2>/dev/null; then
+                    echo " ✓"
+                else
+                    echo " ⚠ (copy failed, will download)"
+                    # Fallback to download
+                    echo -n "  [\$PLUGIN_NUM/\$PLUGIN_COUNT] Installing \$plugin (downloading)..."
+                    DOWNLOAD_COUNT=\$((DOWNLOAD_COUNT + 1))
+                    if timeout 60 docker exec jenkins jenkins-plugin-cli --plugins "\$plugin" >/dev/null 2>&1; then
+                        echo " ✓"
+                    else
+                        echo " ⚠ (timeout or failed)"
+                    fi
+                fi
             else
-                echo " ⚠ (timeout or failed, will continue)"
+                # No cache, download using jenkins-plugin-cli
+                echo -n "  [\$PLUGIN_NUM/\$PLUGIN_COUNT] Installing \$plugin (downloading)..."
+                DOWNLOAD_COUNT=\$((DOWNLOAD_COUNT + 1))
+                
+                if timeout 60 docker exec jenkins jenkins-plugin-cli --plugins "\$plugin" >/dev/null 2>&1; then
+                    echo " ✓"
+                else
+                    echo " ⚠ (timeout or failed, will continue)"
+                fi
             fi
         done
         
         echo ""
+        echo "  - Plugin installation summary:"
+        echo "    Installed from cache: \$CACHED_COUNT"
+        echo "    Downloaded: \$DOWNLOAD_COUNT"
+        echo ""
+        
         echo "  - Restarting Jenkins to activate plugins..."
         docker restart jenkins >/dev/null 2>&1
         sleep 10
@@ -2095,6 +2243,25 @@ EOF
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
         root@localhost:/tmp/ 2>/dev/null || log_warning "Helm cache copy failed (will download in VM)"
+    
+    # Copy cached Jenkins plugins to VM
+    if [ -d "${CACHE_DIR}/jenkins/plugins" ]; then
+        log_info "Copying cached Jenkins plugins to VM..."
+        local plugin_count=0
+        local copied_count=0
+        for plugin_file in "${CACHE_DIR}/jenkins/plugins"/*.hpi; do
+            if [ -f "$plugin_file" ]; then
+                ((plugin_count++))
+                if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                    "$plugin_file" root@localhost:/tmp/ 2>/dev/null; then
+                    ((copied_count++))
+                fi
+            fi
+        done
+        if [ $plugin_count -gt 0 ]; then
+            log_success "Copied ${copied_count}/${plugin_count} cached plugins to VM"
+        fi
+    fi
     
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${VM_DIR}/vm-setup.sh" root@localhost:/tmp/
@@ -3730,6 +3897,7 @@ BANNER
     download_alpine
     create_disks
     cache_all_tools
+    cache_all_plugins
     create_vm_setup_script
     
     # Install Alpine
