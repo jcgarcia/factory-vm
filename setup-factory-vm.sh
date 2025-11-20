@@ -932,6 +932,8 @@ log_info "  This may take 5-10 minutes depending on your internet connection..."
 log_info "  Progress will be shown for each step:"
 log_info "    1. Creating Jenkins configuration files"
 log_info "    2. Installing plugins (25+ plugins, bandwidth intensive)"
+log_info "       Note: Plugin installation happens when VM starts Jenkins service"
+log_info "       This is done inside the VM and may take 3-5 extra minutes"
 log_info "    3. Starting Jenkins container"
 log_info "    4. Waiting for initialization"
 log_info "    5. Setting up CLI tools"
@@ -1405,6 +1407,8 @@ JENKINS_ENV
     echo ""
     echo "  Step 3/5: Starting Jenkins container..."
     echo "  (This will install 25+ plugins - takes 3-5 minutes on slow connections)"
+    echo "  Note: Plugin installation runs inside the VM init.d service"
+    echo "        You won't see detailed progress, but it IS working"
     echo ""
     
     # Start Jenkins now
