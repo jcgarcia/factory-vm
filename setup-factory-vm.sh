@@ -2429,6 +2429,25 @@ chmod 600 /home/foreman/.ssh/authorized_keys
 chown -R foreman:foreman /home/foreman/.ssh
 EOF
 
+    # Wait for SSH to be fully ready after sshd restart
+    log_info "Waiting for SSH to be fully ready..."
+    local ssh_ready=0
+    for i in {1..30}; do
+        if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 -p "$VM_SSH_PORT" root@localhost "echo OK" >/dev/null 2>&1; then
+            ssh_ready=1
+            break
+        fi
+        sleep 2
+    done
+    
+    if [ $ssh_ready -eq 0 ]; then
+        log_error "SSH did not become ready in time"
+        exit 1
+    fi
+    
+    log_success "SSH is ready"
+
     # Copy and run setup script
     log "Installing build tools..."
     log_info "Each component has individual timeouts to handle slow network connections"
