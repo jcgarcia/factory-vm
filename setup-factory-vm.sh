@@ -58,17 +58,48 @@ DATA_DISK_SIZE="200G"   # Increased for build artifacts
 SYSTEM_DISK="${VM_DIR}/${VM_NAME}.qcow2"
 DATA_DISK="${VM_DIR}/${VM_NAME}-data.qcow2"
 
-# Alpine Linux
-ALPINE_VERSION="3.19"
+# Alpine Linux - auto-detect latest version
 ALPINE_ARCH="aarch64"
-ALPINE_ISO="alpine-virt-${ALPINE_VERSION}.1-${ALPINE_ARCH}.iso"
-ALPINE_ISO_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/${ALPINE_ISO}"
+ALPINE_VERSION=""
+ALPINE_ISO=""
+ALPINE_ISO_URL=""
 
-# Tool versions
-TERRAFORM_VERSION="1.6.6"
-KUBECTL_VERSION="1.28.4"
-HELM_VERSION="3.13.3"
-JENKINS_VERSION="2.426.1"
+# Function to get latest Alpine version
+get_latest_alpine_version() {
+    # Try to get latest stable version from Alpine's release page
+    local latest_version=$(curl -s https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/${ALPINE_ARCH}/latest-releases.yaml 2>/dev/null | grep -m1 'version:' | awk '{print $2}' | cut -d. -f1,2)
+    
+    # Fallback to known stable version if auto-detection fails
+    if [ -z "$latest_version" ]; then
+        echo "3.19"
+    else
+        echo "$latest_version"
+    fi
+}
+
+# Tool versions - auto-detect latest releases
+# Functions to get latest versions (fallback to known stable versions if detection fails)
+
+get_latest_terraform_version() {
+    local latest=$(curl -s https://api.github.com/repos/hashicorp/terraform/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    echo "${latest:-1.6.6}"
+}
+
+get_latest_kubectl_version() {
+    local latest=$(curl -s https://dl.k8s.io/release/stable.txt 2>/dev/null | sed 's/^v//')
+    echo "${latest:-1.28.4}"
+}
+
+get_latest_helm_version() {
+    local latest=$(curl -s https://api.github.com/repos/helm/helm/releases/latest 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    echo "${latest:-3.13.3}"
+}
+
+# Jenkins version is managed by Docker image tag (lts-jdk21), so we don't need to specify version
+TERRAFORM_VERSION=""
+KUBECTL_VERSION=""
+HELM_VERSION=""
+JENKINS_VERSION="lts-jdk21"  # Use LTS with JDK 21
 
 # Color codes
 RED='\033[0;31m'
@@ -508,11 +539,32 @@ setup_ssh_keys() {
 download_alpine() {
     log "Downloading Alpine Linux ISO..."
     
+    # Auto-detect latest Alpine version if not already set
+    if [ -z "$ALPINE_VERSION" ]; then
+        ALPINE_VERSION=$(get_latest_alpine_version)
+        log_info "  Auto-detected Alpine version: ${ALPINE_VERSION}"
+    fi
+    
+    # Get the latest patch version from Alpine's latest-releases.yaml
+    local full_version=$(curl -s https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/latest-releases.yaml 2>/dev/null | grep -m1 'version:' | awk '{print $2}')
+    
+    # Fallback to .1 if detection fails
+    if [ -z "$full_version" ]; then
+        full_version="${ALPINE_VERSION}.1"
+        log_info "  Using fallback version: ${full_version}"
+    else
+        log_info "  Latest release: ${full_version}"
+    fi
+    
+    # Set ISO name and URL
+    ALPINE_ISO="alpine-virt-${full_version}-${ALPINE_ARCH}.iso"
+    ALPINE_ISO_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/${ALPINE_ISO}"
+    
     mkdir -p "${VM_DIR}/isos"
     local iso_path="${VM_DIR}/isos/${ALPINE_ISO}"
     
     if [ -f "$iso_path" ]; then
-        log "  ✓ ISO already exists"
+        log "  ✓ ISO already exists: ${ALPINE_ISO}"
         return 0
     fi
     
@@ -931,10 +983,11 @@ log_info "Installing Jenkins with Java 21..."
 log_info "  This may take 5-10 minutes depending on your internet connection..."
 log_info "  Progress will be shown for each step:"
 log_info "    1. Creating Jenkins configuration files"
-log_info "    2. Starting Jenkins container"
-log_info "    3. Waiting for initialization"
-log_info "    4. Installing plugins (25+ plugins, one-by-one for reliability)"
-log_info "    5. Setting up CLI tools"
+log_info "    2. Creating Jenkins service"
+log_info "    3. Starting Jenkins container"
+log_info "    4. Waiting for initialization"
+log_info "    5. Installing plugins (25+ plugins, one-by-one for reliability)"
+log_info "    6. Setting up CLI tools"
 log_info ""
 {
     echo "  Step 1/5: Creating Jenkins directories and configuration..."
@@ -1330,9 +1383,9 @@ JENKINS_CONFIG
     chown -R 1000:1000 /opt/jenkins
     echo " done"
     
-    echo "  ✓ Step 1/5 complete: Configuration files created"
+    echo "  ✓ Step 1/6 complete: Configuration files created"
     echo ""
-    echo "  Step 2/5: Creating Jenkins service..."
+    echo "  Step 2/6: Creating Jenkins service..."
     
     # Create Jenkins service init script
     echo -n "  - Creating /etc/init.d/jenkins service..."
@@ -1354,6 +1407,10 @@ start() {
     if [ -f /opt/jenkins/.env ]; then
         export $(grep -v '^#' /opt/jenkins/.env | xargs)
     fi
+    
+    # Pull Jenkins image first (with progress visibility)
+    echo "Pulling Jenkins Docker image (this may take 10-20 minutes on slow connections)..."
+    docker pull jenkins/jenkins:lts-jdk21
     
     # Start Jenkins without plugins (plugins will be installed after Jenkins is running)
     docker run -d \
@@ -1393,7 +1450,7 @@ JENKINS_INIT
     rc-update add jenkins default 2>&1 | grep -v "already installed" || true
     echo " done"
     
-    echo "  ✓ Step 2/5 complete: Jenkins service created"
+    echo "  ✓ Step 2/6 complete: Jenkins service created"
     echo ""
     
     # Create environment file with passwords for Jenkins container
@@ -1407,7 +1464,7 @@ JENKINS_ENV
     echo " done"
     
     echo ""
-    echo "  Step 3/5: Starting Jenkins container..."
+    echo "  Step 3/6: Starting Jenkins container..."
     echo "  (Plugins will be installed after Jenkins starts)"
     echo ""
     
@@ -1415,9 +1472,9 @@ JENKINS_ENV
     echo "  - Starting Jenkins container (Java 21)..."
     rc-service jenkins start || true
     
-    echo "  ✓ Step 3/5 complete: Jenkins container started"
+    echo "  ✓ Step 3/6 complete: Jenkins container started"
     echo ""
-    echo "  Step 4/5: Waiting for Jenkins to initialize..."
+    echo "  Step 4/6: Waiting for Jenkins to initialize..."
     
     # Wait for Jenkins to be ready (with timeout)
     echo "  - Waiting for Jenkins to initialize..."
@@ -1443,11 +1500,11 @@ JENKINS_ENV
     done
     echo ""
     
-    echo "  ✓ Step 4/5 complete: Jenkins initialized"
+    echo "  ✓ Step 4/6 complete: Jenkins initialized"
     echo ""
     
     # Install plugins one-by-one after Jenkins is running
-    echo "  Step 4.5/5: Installing Jenkins plugins..."
+    echo "  Step 5/6: Installing Jenkins plugins..."
     echo "  - Installing plugins one-by-one for reliability..."
     
     # Read plugins from plugins.txt
@@ -1495,7 +1552,7 @@ JENKINS_ENV
     fi
     echo ""
     
-    echo "  Step 5/5: Setting up Jenkins CLI..."
+    echo "  Step 6/6: Setting up Jenkins CLI..."
     
     # Create agent workspace
     echo "  - Creating agent workspace..."
@@ -1557,7 +1614,7 @@ JENKINS_CLI_PROFILE
     chmod +x /etc/profile.d/jenkins-cli.sh
     echo "  ✓ Jenkins CLI configured (jenkins-factory command available)"
     echo ""
-    echo "  ✓ Step 5/5 complete: Jenkins CLI setup finished"
+    echo "  ✓ Step 6/6 complete: Jenkins CLI setup finished"
     echo ""
     
     # Install Caddy CA certificate in system trust store
