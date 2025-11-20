@@ -1,0 +1,65 @@
+#!/usr/bin/expect -f
+
+# Fix SSH not starting on Alpine installed system
+# This script boots the installed Alpine, logs in, enables SSH, and reboots
+
+set timeout 120
+
+# Spawn QEMU
+spawn qemu-system-aarch64 \
+  -M virt -accel tcg \
+  -cpu cortex-a72 \
+  -smp 4 \
+  -m 4G \
+  -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd \
+  -drive file=/home/jcgarcia/vms/factory/factory.qcow2,if=virtio,format=qcow2 \
+  -drive file=/home/jcgarcia/vms/factory/factory-data.qcow2,if=virtio,format=qcow2 \
+  -device virtio-net-pci,netdev=net0 \
+  -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+  -nographic
+
+# Wait for login prompt
+expect {
+    "factory login:" {
+        send "root\r"
+    }
+    timeout {
+        puts "\nTimeout waiting for login prompt"
+        exit 1
+    }
+}
+
+# Wait for password prompt
+expect {
+    "Password:" {
+        send "ChangeMe123!\r"
+    }
+    timeout {
+        puts "\nTimeout waiting for password prompt"
+        exit 1
+    }
+}
+
+# Wait for shell prompt
+expect "#"
+
+puts "\n=== Enabling SSH on boot ===\n"
+send "rc-update add sshd\r"
+expect "#"
+
+send "rc-update add sshd default\r"
+expect "#"
+
+send "rc-update show default\r"
+expect "#"
+
+puts "\n=== Starting SSH now ===\n"
+send "rc-service sshd start\r"
+expect "#"
+
+puts "\n=== Powering off ===\n"
+send "poweroff\r"
+
+# Wait for shutdown
+expect eof
+puts "\n=== SSH fix complete ===\n"

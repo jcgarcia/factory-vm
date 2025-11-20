@@ -1,0 +1,141 @@
+#!/usr/bin/expect -f
+#
+# Automated Alpine Linux installation for Factory VM
+# Uses individual setup-* commands instead of interactive setup-alpine
+#
+
+set timeout 600
+log_user 1
+
+# Get parameters from environment
+set vm_hostname $env(VM_HOSTNAME)
+set vm_root_password $env(VM_ROOT_PASSWORD)
+set ssh_public_key $env(VM_SSH_PUBLIC_KEY_CONTENT)
+
+# Start QEMU using the command built by the shell script
+eval spawn $env(QEMU_COMMAND)
+
+# Wait for login prompt
+expect {
+    -re "login:" {
+        send "root\r"
+    }
+    timeout {
+        puts "\nERROR: Timeout waiting for login prompt"
+        exit 1
+    }
+}
+
+# Wait for shell prompt
+expect "#"
+sleep 2
+
+# Now run each setup command non-interactively
+puts "\n=== Configuring keymap ===\n"
+send "setup-keymap us us\r"
+expect "#"
+sleep 1
+
+puts "\n=== Setting hostname ===\n"
+send "setup-hostname $vm_hostname\r"
+expect "#"
+sleep 1
+
+puts "\n=== Configuring network (DHCP) ===\n"
+send "setup-interfaces -a\r"
+expect "#"
+sleep 1
+
+puts "\n=== Starting networking ===\n"
+send "rc-service networking start\r"
+expect "#"
+sleep 2
+
+puts "\n=== Setting root password ===\n"
+send "printf '$vm_root_password\\n$vm_root_password\\n' | passwd\r"
+expect "#"
+sleep 1
+
+puts "\n=== Configuring timezone ===\n"
+send "setup-timezone -z UTC\r"
+expect "#"
+sleep 1
+
+puts "\n=== Configuring NTP ===\n"
+send "setup-ntp chrony\r"
+expect {
+    "#" { }
+    "Which NTP client" { send "chrony\r"; exp_continue }
+}
+sleep 2
+
+puts "\n=== Configuring repositories ===\n"
+send "setup-apkrepos -1\r"
+expect {
+    "#" { }
+    "Enter mirror number" { send "1\r"; exp_continue }
+}
+sleep 2
+
+puts "\n=== Configuring SSH ===\n"
+send "setup-sshd openssh\r"
+expect {
+    "#" { }
+    "Which SSH server" { send "openssh\r"; exp_continue }
+}
+sleep 2
+
+puts "\n=== Installing to disk (this takes a few minutes) ===\n"
+send "setup-disk -m sys /dev/vda\r"
+expect {
+    "WARNING" { send "y\r"; exp_continue }
+    "Erase" { send "y\r"; exp_continue }
+    "#" { }
+    timeout {
+        puts "ERROR: Timeout during disk setup"
+        exit 1
+    }
+}
+sleep 3
+
+puts "\n=== Mounting installed system to enable services ===\n"
+send "mount /dev/vda3 /mnt\r"
+expect "#"
+sleep 1
+
+puts "\n=== Enabling SSH on boot in installed system ===\n"
+send "chroot /mnt rc-update add sshd default\r"
+expect "#"
+sleep 1
+
+puts "\n=== Enabling networking on boot in installed system ===\n"
+send "chroot /mnt rc-update add networking default\r"
+expect "#"
+sleep 1
+
+puts "\n=== Configuring SSH key authentication for root ===\n"
+send "mkdir -p /mnt/root/.ssh\r"
+expect "#"
+send "chmod 700 /mnt/root/.ssh\r"
+expect "#"
+send "cat > /mnt/root/.ssh/authorized_keys << 'SSHKEY'\r"
+send "${ssh_public_key}\r"
+send "SSHKEY\r"
+expect "#"
+send "chmod 600 /mnt/root/.ssh/authorized_keys\r"
+expect "#"
+sleep 1
+
+puts "\n=== Unmounting installed system ===\n"
+send "umount /mnt\r"
+expect "#"
+sleep 1
+
+puts "\n=== Installation complete, powering off ===\n"
+send "poweroff\r"
+
+# Wait for VM to shutdown
+expect eof
+
+puts "\nAlpine installation completed successfully"
+exit 0
