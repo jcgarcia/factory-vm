@@ -928,10 +928,16 @@ SKIPPED_COMPONENTS+=("Android SDK")
 ################################################################################
 
 log_info "Installing Jenkins with Java 21..."
-log_info "  This may take 3-5 minutes - configuring Jenkins, plugins, and CLI..."
+log_info "  This may take 5-10 minutes depending on your internet connection..."
+log_info "  Progress will be shown for each step:"
+log_info "    1. Creating Jenkins configuration files"
+log_info "    2. Installing plugins (25+ plugins, bandwidth intensive)"
+log_info "    3. Starting Jenkins container"
+log_info "    4. Waiting for initialization"
+log_info "    5. Setting up CLI tools"
+log_info ""
 {
-    echo "Setting up Jenkins with Java 21..."
-    echo "  - Creating Jenkins directories..."
+    echo "  Step 1/5: Creating Jenkins directories and configuration..."
     mkdir -p /opt/jenkins
     # Jenkins container runs as UID 1000, fix permissions
     chown -R 1000:1000 /opt/jenkins
@@ -1313,6 +1319,10 @@ JENKINS_CONFIG
 
     chown -R 1000:1000 /opt/jenkins
     
+    echo "  ✓ Step 1/5 complete: Configuration files created"
+    echo ""
+    echo "  Step 2/5: Creating Jenkins service init script..."
+    
     # Create Jenkins service init script
     cat > /etc/init.d/jenkins << 'JENKINS_INIT'
 #!/sbin/openrc-run
@@ -1331,10 +1341,12 @@ start() {
     # Install plugins before starting Jenkins
     if [ -f /opt/jenkins/plugins.txt ] && [ ! -f /opt/jenkins/.plugins-installed ]; then
         echo "Installing Jenkins plugins from plugins.txt..."
+        echo "This may take 3-5 minutes depending on internet speed..."
         docker run --rm \
             -v /opt/jenkins:/var/jenkins_home \
             jenkins/jenkins:lts-jdk21 \
-            jenkins-plugin-cli --plugin-file /var/jenkins_home/plugins.txt
+            jenkins-plugin-cli --plugin-file /var/jenkins_home/plugins.txt 2>&1 | \
+            grep -E "Downloaded|Installing|Installed|plugin" || true
         
         touch /opt/jenkins/.plugins-installed
         echo "Plugins installed successfully"
@@ -1375,6 +1387,9 @@ JENKINS_INIT
     
     chmod +x /etc/init.d/jenkins
     
+    echo "  ✓ Step 2/5 complete: Jenkins service configured"
+    echo ""
+    
     # Enable Jenkins to start on boot
     rc-update add jenkins default
     
@@ -1387,26 +1402,47 @@ JENKINS_ENV
     chmod 600 /opt/jenkins/.env
     chown 1000:1000 /opt/jenkins/.env
     
+    echo ""
+    echo "  Step 3/5: Starting Jenkins container..."
+    echo "  (This will install 25+ plugins - takes 3-5 minutes on slow connections)"
+    echo ""
+    
     # Start Jenkins now
     echo "  - Starting Jenkins container (Java 21)..."
     rc-service jenkins start || true
     
+    echo "  ✓ Step 3/5 complete: Jenkins container started"
+    echo ""
+    echo "  Step 4/5: Waiting for Jenkins to initialize..."
+    
     # Wait for Jenkins to be ready (with timeout)
     echo "  - Waiting for Jenkins to initialize..."
     echo "    (This takes 2-3 minutes: starting container, loading plugins, running init scripts)"
+    echo ""
+    START_TIME=$(date +%s)
     for i in {1..90}; do
         if docker exec jenkins test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
-            echo "  - Jenkins is ready!"
+            ELAPSED=$(($(date +%s) - START_TIME))
+            echo ""
+            echo "  ✓ Jenkins is ready! (took ${ELAPSED} seconds)"
             break
         fi
         if [ $i -eq 90 ]; then
-            echo "  - Jenkins initialization timed out (may still be starting in background)"
+            echo ""
+            echo "  ⚠ Jenkins initialization timed out (may still be starting in background)"
         fi
-        if [ $((i % 10)) -eq 0 ]; then
-            echo "    ... still initializing (${i} seconds elapsed)"
+        # Show progress every 5 seconds
+        if [ $((i % 5)) -eq 0 ]; then
+            ELAPSED=$(($(date +%s) - START_TIME))
+            printf "\r    ⏳ Initializing... %d seconds elapsed" "$ELAPSED"
         fi
         sleep 2
     done
+    echo ""
+    
+    echo "  ✓ Step 4/5 complete: Jenkins initialized"
+    echo ""
+    echo "  Step 5/5: Setting up Jenkins CLI..."
     
     # Create agent workspace
     echo "  - Creating agent workspace..."
@@ -1417,18 +1453,23 @@ JENKINS_ENV
     echo "  - Setting up Jenkins CLI for VM usage..."
     mkdir -p /usr/local/share/jenkins
     # Download CLI jar from Jenkins (wait a bit for Jenkins to be ready)
+    echo "  - Downloading Jenkins CLI jar..."
     sleep 10
     for i in {1..30}; do
         if wget -q -O /usr/local/share/jenkins/jenkins-cli.jar http://localhost:8080/jnlpJars/jenkins-cli.jar 2>/dev/null; then
             chmod 644 /usr/local/share/jenkins/jenkins-cli.jar
-            echo "  - Jenkins CLI jar downloaded successfully"
+            echo "  ✓ Jenkins CLI jar downloaded successfully"
             break
         fi
         if [ $i -eq 30 ]; then
-            echo "  - Jenkins CLI jar download timed out (will be available later)"
+            echo "  ⚠ Jenkins CLI jar download timed out (will be available later)"
+        fi
+        if [ $((i % 5)) -eq 0 ]; then
+            printf "\r    ⏳ Waiting for Jenkins web interface... %d seconds" "$((i * 2))"
         fi
         sleep 2
     done
+    echo ""
     
     # Add jenkins-factory function to /etc/profile.d so it's available for all users
     cat > /etc/profile.d/jenkins-cli.sh << 'JENKINS_CLI_PROFILE'
@@ -1457,7 +1498,10 @@ jenkins-factory() {
 }
 JENKINS_CLI_PROFILE
     chmod +x /etc/profile.d/jenkins-cli.sh
-    echo "  - Jenkins CLI configured (jenkins-factory command available)"
+    echo "  ✓ Jenkins CLI configured (jenkins-factory command available)"
+    echo ""
+    echo "  ✓ Step 5/5 complete: Jenkins CLI setup finished"
+    echo ""
     
     # Install Caddy CA certificate in system trust store
     echo "  - Installing Caddy CA certificate for HTTPS..."
