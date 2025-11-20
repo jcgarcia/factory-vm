@@ -1,17 +1,134 @@
 # Factory VM - Current Status and Context
-**Date**: November 20, 2025 09:45
-**Session**: Jenkins API Token Bug Fixed - Ready for Fresh Test
+**Date**: November 20, 2025 18:30
+**Session**: V2 Caching Architecture - Phase 2 Complete
 
 ## Quick Summary
 
-**Latest Issue**: Jenkins API token not persisting - FIXED ✅
-**Current VM**: Working after token fix applied
-**Total Fixes**: 5 critical bugs fixed (4 from Nov 18 + 1 from Nov 20)
-**Next Step**: Fresh installation test to verify all fixes work together
+**Latest Work**: Phase 2 Jenkins plugin caching implemented ✅
+**Current Branch**: v2-caching-architecture
+**Architecture**: V2 caching (tools + plugins)
+**Next Phase**: Phase 3 - SSH-based installation (replace heredoc)
+**Expected Performance**: 49min → 15-20min on subsequent installs
 
 ---
 
-## Bug #5: Jenkins API Token Not Persisting ✅ FIXED
+## V2 Caching Architecture Progress
+
+### ✅ Phase 1: Tool Caching (COMPLETE)
+**Commit**: 7af0cdb
+**Date**: November 20, 2025
+
+**Implemented**:
+- `download_and_cache_terraform()` - Downloads Terraform to cache
+- `download_and_cache_kubectl()` - Downloads kubectl to cache  
+- `download_and_cache_helm()` - Downloads Helm to cache
+- `cache_all_tools()` - Parallel downloads with version detection
+- Cache directory: `~/vms/factory/cache/{terraform,kubectl,helm}/`
+- Modified vm-setup.sh to prefer cached files
+- SCP cached files from host → VM before installation
+
+**Performance**: Saves ~5-10 minutes on subsequent installs
+
+---
+
+### ✅ Phase 2: Jenkins Plugin Caching (COMPLETE)
+**Commit**: 34974fb
+**Date**: November 20, 2025
+
+**Implemented**:
+- `download_and_cache_plugin()` - Downloads individual .hpi files
+- `cache_all_plugins()` - Downloads all 25 plugins in parallel batches (5 at a time)
+- Cache directory: `~/vms/factory/cache/jenkins/plugins/`
+- Modified vm-setup.sh to install plugins from /tmp cache first
+- Graceful fallback to jenkins-plugin-cli if cache missing
+- SCP all cached .hpi files from host → VM
+- Installation summary shows cached vs downloaded counts
+
+**Performance**: Saves ~20-25 minutes on subsequent installs (plugins are biggest download)
+
+**Cache Structure**:
+```
+~/vms/factory/cache/
+├── terraform/
+│   └── terraform_1.14.0_linux_arm64.zip
+├── kubectl/
+│   └── kubectl_1.34.2
+├── helm/
+│   └── helm-v4.0.0-linux-arm64.tar.gz
+└── jenkins/
+    └── plugins/
+        ├── configuration-as-code.hpi
+        ├── git.hpi
+        ├── git-client.hpi
+        ... (25 plugins total)
+```
+
+**Expected Installation Times**:
+- v1 (no caching): ~49 minutes
+- v2 Phase 1 (tools only): ~40 minutes
+- v2 Phase 2 (tools + plugins): **~15-20 minutes** ⭐
+
+---
+
+### 🚧 Phase 3: SSH-Based Installation (NEXT)
+**Status**: Not started
+**Goal**: Replace heredoc with individual SSH commands from host
+
+**Benefits**:
+- Real-time output visibility on host terminal
+- No output buffering issues
+- Easier debugging (see exactly what's running)
+- Can pause/resume installation
+- Better error handling per component
+
+**Scope**:
+- Large refactoring - replace 1000+ line heredoc
+- Install components via SSH commands instead of vm-setup.sh script
+- Keep caching architecture from Phase 1 & 2
+- Recommended: Create feature branch `v2.1-ssh-based-install`
+
+---
+
+### 📋 Future Phases (Planned)
+
+#### Phase 4: Alpine ISO Caching
+- Cache Alpine ISO (~200MB)
+- Saves 5-10 minutes on slow connections
+
+#### Phase 5: Docker Image Caching  
+- Cache Jenkins Docker image
+- Saves 10-20 minutes on TCG emulation
+
+#### Phase 6: Jenkins CLI on Host
+- Install Jenkins CLI on host
+- Install plugins via SSH tunnel + jenkins-cli
+- Real-time plugin installation progress
+
+---
+
+## Branches and Versions
+
+### `main` (Stable)
+- v1.0 architecture (heredoc-based)
+- Installation time: ~49 minutes
+- Proven working (completed Nov 18-20)
+
+### `v1-stable-heredoc` (Archive)
+- Snapshot of v1 before v2 development
+- Installation time: ~49 minutes
+- Fallback branch if v2 has issues
+
+### `v2-caching-architecture` (Current Development) ⭐
+- Phase 1: Tool caching ✅
+- Phase 2: Plugin caching ✅
+- Phase 3: SSH-based install 🚧
+- Expected time: ~15-20 minutes (after cache built)
+
+**Documentation**: See `BRANCHES-AND-VERSIONS.md` for detailed comparison
+
+---
+
+## Previous Session Work (Nov 18-20, 2025)
 **Date**: November 20, 2025
 **Commit**: 4ba0ed4e1 + updates
 

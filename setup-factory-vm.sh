@@ -227,6 +227,9 @@ cache_all_plugins() {
     log_info "First-time downloads will be cached for faster subsequent installations"
     echo ""
     
+    # Ensure we don't exit on error during plugin downloads
+    set +e
+    
     # Plugin list (from plugins.txt in heredoc)
     local plugins=(
         "configuration-as-code"
@@ -295,7 +298,8 @@ cache_all_plugins() {
         
         # Wait for batch to complete
         for pid in "${pids[@]}"; do
-            if wait $pid; then
+            wait $pid && local result=0 || local result=$?
+            if [ $result -eq 0 ]; then
                 ((downloaded++))
                 echo " ✓"
             else
@@ -317,7 +321,141 @@ cache_all_plugins() {
     
     log_success "Plugins cached and ready for installation"
     echo ""
+    
+    # Re-enable exit on error
+    set -e
 }
+
+################################################################################
+# SSH-Based Installation Functions (Phase 3)
+################################################################################
+
+# Helper function to execute commands via SSH
+ssh_exec() {
+    ssh -tt -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=60 -o ServerAliveInterval=30 -p "$VM_SSH_PORT" root@localhost "$@"
+}
+
+# Component 1: Install base packages via SSH
+install_base_packages_via_ssh() {
+    log ""
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  Component 1/9: Base Packages"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    log_info "Updating package repositories..."
+    ssh_exec "sed -i '/^#.*community/s/^#//' /etc/apk/repositories || echo 'http://dl-cdn.alpinelinux.org/alpine/v3.19/community' >> /etc/apk/repositories"
+    ssh_exec "apk update"
+    
+    log_info "Installing base packages (bash, curl, git, etc.)..."
+    ssh_exec "apk add --no-cache bash curl wget git nano vim openssl ca-certificates unzip tar gzip jq openssh sudo doas"
+    
+    log_success "Base packages installed"
+}
+
+# Component 2: Install Docker via SSH
+install_docker_via_ssh() {
+    log ""
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  Component 2/9: Docker"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    log_info "Installing Docker..."
+    ssh_exec "apk add --no-cache docker docker-cli-compose"
+    
+    log_info "Starting Docker service..."
+    ssh_exec "rc-update add docker default"
+    ssh_exec "rc-service docker start"
+    
+    log_info "Waiting for Docker to be ready..."
+    ssh_exec "timeout 30 sh -c 'until docker info >/dev/null 2>&1; do sleep 1; done' || true"
+    
+    log_success "Docker installed and running"
+}
+
+# Component 3: Install Kubernetes tools via SSH
+install_kubernetes_tools_via_ssh() {
+    log ""
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  Component 3/9: Kubernetes Tools (kubectl & Helm)"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # kubectl
+    log_info "Installing kubectl ${KUBECTL_VERSION}..."
+    if ssh_exec "test -f /tmp/kubectl"; then
+        log_info "  Using cached kubectl"
+        ssh_exec "mv /tmp/kubectl /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl"
+    else
+        log_info "  Downloading kubectl (no cache found)..."
+        ssh_exec "curl -sL https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/arm64/kubectl -o /usr/local/bin/kubectl && chmod +x /usr/local/bin/kubectl"
+    fi
+    
+    # Helm
+    log_info "Installing Helm ${HELM_VERSION}..."
+    if ssh_exec "test -f /tmp/helm-v${HELM_VERSION}-linux-arm64.tar.gz"; then
+        log_info "  Using cached Helm"
+        ssh_exec "tar -xzf /tmp/helm-v${HELM_VERSION}-linux-arm64.tar.gz -C /tmp && mv /tmp/linux-arm64/helm /usr/local/bin/helm && chmod +x /usr/local/bin/helm"
+    else
+        log_info "  Downloading Helm (no cache found)..."
+        ssh_exec "curl -sL https://get.helm.sh/helm-v${HELM_VERSION}-linux-arm64.tar.gz | tar -xz -C /tmp && mv /tmp/linux-arm64/helm /usr/local/bin/helm"
+    fi
+    
+    log_success "Kubernetes tools installed"
+}
+
+# Component 4: Install Terraform via SSH
+install_terraform_via_ssh() {
+    log ""
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  Component 4/9: Terraform"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    log_info "Installing Terraform ${TERRAFORM_VERSION}..."
+    if ssh_exec "test -f /tmp/terraform_${TERRAFORM_VERSION}_linux_arm64.zip"; then
+        log_info "  Using cached Terraform"
+        ssh_exec "unzip -q /tmp/terraform_${TERRAFORM_VERSION}_linux_arm64.zip -d /usr/local/bin/ && chmod +x /usr/local/bin/terraform"
+    else
+        log_info "  Downloading Terraform (no cache found)..."
+        ssh_exec "curl -sL https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_arm64.zip -o /tmp/terraform.zip && unzip -q /tmp/terraform.zip -d /usr/local/bin/ && rm /tmp/terraform.zip"
+    fi
+    
+    log_success "Terraform installed"
+}
+
+# Component 5: Install AWS CLI via SSH
+install_aws_cli_via_ssh() {
+    log ""
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  Component 5/9: AWS CLI"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    log_info "Installing AWS CLI v2..."
+    ssh_exec "apk add --no-cache python3 py3-pip"
+    ssh_exec "pip3 install --break-system-packages awscli"
+    
+    log_success "AWS CLI installed"
+}
+
+# Component 6: Install jcscripts via SSH
+install_jcscripts_via_ssh() {
+    log ""
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "  Component 6/9: jcscripts (awslogin)"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    log_info "Cloning jcscripts repository..."
+    ssh_exec "git clone https://github.com/jcgarciasis/jcscripts.git /opt/jcscripts"
+    ssh_exec "chmod +x /opt/jcscripts/*.sh"
+    ssh_exec "ln -sf /opt/jcscripts/awslogin.sh /usr/local/bin/awslogin"
+    
+    log_success "jcscripts installed"
+}
+
+# Component 7: Install Caddy via SSH (will be handled separately with full config)
+
+# Component 8: Install Jenkins via SSH (will be handled separately with full config)
+
+# Component 9: Install Jenkins plugins via SSH (will be handled separately)
 
 # Color codes
 RED='\033[0;31m'
