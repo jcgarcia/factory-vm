@@ -664,7 +664,7 @@ create_vm_setup_script() {
     
     # Note: heredoc WITHOUT quotes allows variable substitution
     # Use \$ to escape variables that should NOT be substituted
-    cat > "\$setup_script" << SETUP_SCRIPT_EOF
+    cat > "$setup_script" << SETUP_SCRIPT_EOF
 #!/bin/bash
 # This script runs inside the Factory VM to install all build tools
 # Installs components individually with proper error handling and timeouts
