@@ -1418,8 +1418,8 @@ JENKINS_ENV
     # Wait for Jenkins to be ready (with timeout)
     echo "  - Waiting for Jenkins to initialize..."
     echo "    (This takes 2-3 minutes: starting container, loading plugins, running init scripts)"
-    echo ""
     START_TIME=$(date +%s)
+    echo -n "    Progress: "
     for i in {1..90}; do
         if docker exec jenkins test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
             ELAPSED=$(($(date +%s) - START_TIME))
@@ -1431,10 +1431,9 @@ JENKINS_ENV
             echo ""
             echo "  ⚠ Jenkins initialization timed out (may still be starting in background)"
         fi
-        # Show progress every 5 seconds
+        # Show progress dot every 5 seconds
         if [ $((i % 5)) -eq 0 ]; then
-            ELAPSED=$(($(date +%s) - START_TIME))
-            printf "\r    ⏳ Initializing... %d seconds elapsed" "$ELAPSED"
+            echo -n "."
         fi
         sleep 2
     done
@@ -1455,17 +1454,21 @@ JENKINS_ENV
     # Download CLI jar from Jenkins (wait a bit for Jenkins to be ready)
     echo "  - Downloading Jenkins CLI jar..."
     sleep 10
+    echo -n "    Progress: "
     for i in {1..30}; do
         if wget -q -O /usr/local/share/jenkins/jenkins-cli.jar http://localhost:8080/jnlpJars/jenkins-cli.jar 2>/dev/null; then
             chmod 644 /usr/local/share/jenkins/jenkins-cli.jar
+            echo ""
             echo "  ✓ Jenkins CLI jar downloaded successfully"
             break
         fi
         if [ $i -eq 30 ]; then
+            echo ""
             echo "  ⚠ Jenkins CLI jar download timed out (will be available later)"
         fi
+        # Show progress dot every 5 seconds
         if [ $((i % 5)) -eq 0 ]; then
-            printf "\r    ⏳ Waiting for Jenkins web interface... %d seconds" "$((i * 2))"
+            echo -n "."
         fi
         sleep 2
     done
