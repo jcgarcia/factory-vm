@@ -4,6 +4,26 @@
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+The installer needs QEMU to run the ARM64 virtual machine:
+
+**Ubuntu/Debian**:
+```bash
+sudo apt-get update
+sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 qemu-utils
+```
+
+**RHEL/Rocky/AlmaLinux**:
+```bash
+sudo dnf install -y qemu-system-aarch64 qemu-efi-aarch64 qemu-img
+```
+
+**Arch Linux**:
+```bash
+sudo pacman -S qemu-system-aarch64 edk2-armvirt
+```
+
 ### One-Liner Installation
 
 Clone and run with a single command:
