@@ -221,6 +221,40 @@ EOF
     return 0
 }
 
+download_and_cache_jenkins_image() {
+    local cache_file="${CACHE_DIR}/jenkins/jenkins-${JENKINS_VERSION}.tar"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "Jenkins Docker image already cached"
+        return 0
+    fi
+    
+    log_info "Downloading Jenkins Docker image (jenkins/jenkins:${JENKINS_VERSION})..."
+    log_info "  This is a 1.5+ GB download and will take several minutes"
+    log_info "  But it only needs to be downloaded once!"
+    
+    mkdir -p "${CACHE_DIR}/jenkins"
+    
+    # Pull the image if not already present locally
+    if ! docker image inspect jenkins/jenkins:${JENKINS_VERSION} >/dev/null 2>&1; then
+        if ! docker pull jenkins/jenkins:${JENKINS_VERSION}; then
+            log_error "Failed to pull Jenkins Docker image"
+            return 1
+        fi
+    fi
+    
+    # Save to cache
+    log_info "Saving Jenkins image to cache (this may take a few minutes)..."
+    if docker save jenkins/jenkins:${JENKINS_VERSION} -o "$cache_file"; then
+        log_success "Jenkins Docker image cached ($(du -h "$cache_file" | cut -f1))"
+        return 0
+    else
+        log_error "Failed to save Jenkins image to cache"
+        rm -f "$cache_file"
+        return 1
+    fi
+}
+
 cache_all_tools() {
     log "Downloading and caching installation files..."
     log_info "First-time downloads will be cached for faster subsequent installations"
@@ -235,6 +269,7 @@ cache_all_tools() {
     log_info "  Terraform: ${TERRAFORM_VERSION}"
     log_info "  kubectl: ${KUBECTL_VERSION}"
     log_info "  Helm: ${HELM_VERSION}"
+    log_info "  Jenkins: ${JENKINS_VERSION}"
     echo ""
     
     # Download in parallel (background jobs)
@@ -248,6 +283,8 @@ cache_all_tools() {
     local awscli_pid=$!
     download_and_cache_ansible &
     local ansible_pid=$!
+    download_and_cache_jenkins_image &
+    local jenkins_pid=$!
     
     # Wait for parallel downloads
     wait $terraform_pid
@@ -255,6 +292,7 @@ cache_all_tools() {
     wait $helm_pid
     wait $awscli_pid
     wait $ansible_pid
+    wait $jenkins_pid
     
     log_success "All tools cached and ready for installation"
     echo ""
@@ -1929,9 +1967,16 @@ start() {
         export \$(grep -v '^#' /opt/jenkins/.env | xargs)
     fi
     
-    # Pull Jenkins image first (with progress visibility)
-    echo "Pulling Jenkins Docker image (this may take 10-20 minutes on slow connections)..."
-    docker pull jenkins/jenkins:lts-jdk21
+    # Load cached Jenkins image if available, otherwise pull from internet
+    if [ -f /var/cache/factory-build/jenkins-image.tar ]; then
+        echo "Loading Jenkins Docker image from cache..."
+        docker load -i /var/cache/factory-build/jenkins-image.tar
+        echo "Jenkins image loaded from cache (fast!)"
+    else
+        echo "No cached image found, pulling from Docker Hub..."
+        echo "This may take 10-20 minutes on slow connections..."
+        docker pull jenkins/jenkins:lts-jdk21
+    fi
     
     # Start Jenkins without plugins (plugins will be installed after Jenkins is running)
     docker run -d \
@@ -2519,6 +2564,19 @@ EOF
         scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/ansible/ansible-requirements.txt" \
             foreman@localhost:/var/cache/factory-build/ansible/ 2>/dev/null || true
+    fi
+    
+    # Copy Jenkins Docker image if cached
+    if [ -f "${CACHE_DIR}/jenkins/jenkins-${JENKINS_VERSION}.tar" ]; then
+        log_info "Copying Jenkins Docker image from cache..."
+        log_info "  This is a large file (1.5+ GB) and will take a few minutes to transfer..."
+        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "${CACHE_DIR}/jenkins/jenkins-${JENKINS_VERSION}.tar" \
+            foreman@localhost:/var/cache/factory-build/jenkins-image.tar; then
+            log_info "✓ Jenkins image cached copy successful"
+        else
+            log_warning "Jenkins image cache copy failed (will pull in VM)"
+        fi
     fi
     
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
@@ -3475,15 +3533,82 @@ setup_jenkins_cli() {
     
     # Step 7: Test the CLI before saving configuration
     log_info "  Testing Jenkins CLI connection..."
+    local cli_working=false
     if echo "$api_token" | java -jar ~/.java/jars/jenkins-cli-factory.jar \
         -s https://factory.local \
         -auth foreman:@- \
         -webSocket \
         who-am-i >/dev/null 2>&1; then
         log_success "  ✓ Jenkins CLI authentication successful"
+        cli_working=true
     else
         log_warning "  Jenkins CLI test failed - configuration may need adjustment"
         log_info "  Continuing with setup..."
+    fi
+    
+    # Step 8: Install Jenkins plugins if CLI is working
+    if [ "$cli_working" = "true" ]; then
+        log_info "  Installing Jenkins plugins from plugins.txt..."
+        
+        # Get plugin list from VM
+        local plugins_list
+        plugins_list=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
+            "cat /opt/jenkins/plugins.txt 2>/dev/null | grep -v '^#' | grep -v '^$' | awk '{print \$1}'" 2>/dev/null)
+        
+        if [ -z "$plugins_list" ]; then
+            log_warning "  No plugins found in plugins.txt"
+        else
+            local plugin_count=$(echo "$plugins_list" | wc -l)
+            log_info "  Found $plugin_count plugins to install"
+            log_info "  This will take several minutes - please be patient..."
+            
+            local installed=0
+            local failed=0
+            
+            while IFS= read -r plugin; do
+                [ -z "$plugin" ] && continue
+                
+                # Show progress every 5 plugins
+                if [ $((installed % 5)) -eq 0 ] && [ $installed -gt 0 ]; then
+                    log_info "    Progress: $installed/$plugin_count plugins installed..."
+                fi
+                
+                if echo "$api_token" | java -jar ~/.java/jars/jenkins-cli-factory.jar \
+                    -s https://factory.local \
+                    -auth foreman:@- \
+                    -webSocket \
+                    install-plugin "$plugin" >/dev/null 2>&1; then
+                    installed=$((installed + 1))
+                else
+                    failed=$((failed + 1))
+                    log_warning "    Failed to install: $plugin"
+                fi
+            done <<< "$plugins_list"
+            
+            if [ $installed -gt 0 ]; then
+                log_success "  ✓ Installed $installed/$plugin_count plugins successfully"
+                if [ $failed -gt 0 ]; then
+                    log_warning "  ⚠ $failed plugins failed to install"
+                fi
+                
+                log_info "  Restarting Jenkins to activate plugins..."
+                if echo "$api_token" | java -jar ~/.java/jars/jenkins-cli-factory.jar \
+                    -s https://factory.local \
+                    -auth foreman:@- \
+                    -webSocket \
+                    safe-restart >/dev/null 2>&1; then
+                    log_success "  ✓ Jenkins restart initiated"
+                    log_info "  Jenkins will be fully ready in 1-2 minutes"
+                else
+                    log_warning "  Could not restart Jenkins automatically"
+                    log_info "  Restart manually: ssh factory 'sudo rc-service jenkins restart'"
+                fi
+            else
+                log_warning "  No plugins were installed"
+            fi
+        fi
+    else
+        log_info "  Skipping plugin installation (CLI not working)"
     fi
     
     # Add jenkins-factory function to .bashrc if not already present
@@ -4282,8 +4407,8 @@ BANNER
     log "  Features:"
     log "    ${GREEN}✓${NC} Auto-starts on boot"
     log "    ${GREEN}✓${NC} SSL/TLS encryption"
-    log "    ${GREEN}✓${NC} Reverse proxy (Nginx)"
-    log "    ${GREEN}✓${NC} Essential plugins pre-installed"
+    log "    ${GREEN}✓${NC} Reverse proxy (Caddy)"
+    log "    ${GREEN}✓${NC} Essential plugins installed (25+)"
     log "    ${GREEN}✓${NC} Security configured"
     log "    ${GREEN}✓${NC} AWS credentials support"
     log ""
