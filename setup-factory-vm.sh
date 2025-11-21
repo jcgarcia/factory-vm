@@ -229,6 +229,19 @@ download_and_cache_jenkins_image() {
         return 0
     fi
     
+    # Check if Docker is available and accessible
+    if ! command -v docker >/dev/null 2>&1; then
+        log_info "Docker not installed - skipping Jenkins image caching"
+        log_info "  (Image will be pulled directly in VM)"
+        return 0
+    fi
+    
+    if ! docker info >/dev/null 2>&1; then
+        log_info "Docker not accessible (permission denied or not running)"
+        log_info "  Skipping Jenkins image caching - image will be pulled in VM"
+        return 0
+    fi
+    
     log_info "Downloading Jenkins Docker image (jenkins/jenkins:${JENKINS_VERSION})..."
     log_info "  This is a 1.5+ GB download and will take several minutes"
     log_info "  But it only needs to be downloaded once!"
@@ -238,8 +251,8 @@ download_and_cache_jenkins_image() {
     # Pull the image if not already present locally
     if ! docker image inspect jenkins/jenkins:${JENKINS_VERSION} >/dev/null 2>&1; then
         if ! docker pull jenkins/jenkins:${JENKINS_VERSION}; then
-            log_error "Failed to pull Jenkins Docker image"
-            return 1
+            log_warning "Failed to pull Jenkins Docker image - will pull in VM"
+            return 0
         fi
     fi
     
@@ -249,9 +262,9 @@ download_and_cache_jenkins_image() {
         log_success "Jenkins Docker image cached ($(du -h "$cache_file" | cut -f1))"
         return 0
     else
-        log_error "Failed to save Jenkins image to cache"
+        log_warning "Failed to save Jenkins image to cache - will pull in VM"
         rm -f "$cache_file"
-        return 1
+        return 0
     fi
 }
 
