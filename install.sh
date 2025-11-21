@@ -25,6 +25,21 @@ if [ -d "$REPO_DIR" ]; then
     echo "→ Repository exists, checking for updates..."
     cd "$REPO_DIR"
     
+    # Check if it's actually a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo "⚠ Warning: Directory exists but is not a git repository"
+        echo "→ Removing and cloning fresh..."
+        cd "$HOME"
+        rm -rf "$REPO_DIR"
+        git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
+        cd "$REPO_DIR"
+        echo "✓ Repository cloned"
+        echo ""
+        echo "→ Starting installation..."
+        echo ""
+        exec ./setup-factory-vm.sh --auto
+    fi
+    
     # Get current branch
     current_branch=$(git rev-parse --abbrev-ref HEAD)
     
