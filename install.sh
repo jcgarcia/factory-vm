@@ -2,12 +2,13 @@
 #
 # Factory VM One-Liner Installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/jcgarcia/factory-vm/main/install.sh | bash
-# Version: 2.0.0
+# Version: 2.1.0
 #
 
 set -e
 
 REPO_URL="https://github.com/jcgarcia/factory-vm.git"
+RAW_URL="https://raw.githubusercontent.com/jcgarcia/factory-vm"
 REPO_DIR="$HOME/factory-vm"
 BRANCH="${FACTORY_VM_BRANCH:-main}"
 
@@ -20,85 +21,31 @@ echo ""
 echo "Branch: $BRANCH"
 echo ""
 
-# Check if directory exists
-if [ -d "$REPO_DIR" ]; then
-    echo "→ Repository exists, checking for updates..."
-    cd "$REPO_DIR"
-    
-    # Check if it's actually a git repository
-    if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        echo "⚠ Warning: Directory exists but is not a git repository"
-        echo "→ Preserving cache and cloning fresh..."
-        cd "$HOME"
-        
-        # Preserve cache if it exists
-        if [ -d "$REPO_DIR/cache" ]; then
-            echo "→ Backing up cache..."
-            mv "$REPO_DIR/cache" "$HOME/.factory-cache-backup"
-        fi
-        
-        # Remove directory and clone fresh
-        rm -rf "$REPO_DIR"
-        git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
-        cd "$REPO_DIR"
-        
-        # Restore cache
-        if [ -d "$HOME/.factory-cache-backup" ]; then
-            echo "→ Restoring cache..."
-            mv "$HOME/.factory-cache-backup" "$REPO_DIR/cache"
-        fi
-        
-        echo "✓ Repository cloned"
-        echo ""
-        echo "→ Starting installation..."
-        echo ""
-        exec ./setup-factory-vm.sh --auto
-    fi
-    
-    # Get current branch
-    current_branch=$(git rev-parse --abbrev-ref HEAD)
-    
-    # Get local and remote commit hashes
-    local_commit=$(git rev-parse HEAD)
-    
-    # Fetch latest from remote
-    git fetch origin "$BRANCH" --quiet 2>/dev/null || {
-        echo "⚠ Warning: Could not fetch updates (offline?)"
-        echo "→ Using existing local version"
-        echo ""
-    }
-    
-    remote_commit=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "$local_commit")
-    
-    if [ "$local_commit" == "$remote_commit" ]; then
-        echo "✓ Repository is up to date!"
-        echo "  Local:  $local_commit"
-        echo "  Remote: $remote_commit"
-    else
-        echo "→ Updates available!"
-        echo "  Local:  $local_commit"
-        echo "  Remote: $remote_commit"
-        echo ""
-        echo "→ Pulling latest changes..."
-        
-        # Reset to match remote exactly (ignore local line ending changes)
-        git reset --hard "origin/$BRANCH" --quiet
-        
-        echo "✓ Repository updated!"
-    fi
-else
-    echo "→ Cloning repository..."
-    git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
-    cd "$REPO_DIR"
-    echo "✓ Repository cloned"
+# Create directory structure
+mkdir -p "$REPO_DIR"
+cd "$REPO_DIR"
+
+# Preserve existing cache
+if [ -d "cache" ]; then
+    echo "→ Preserving existing cache..."
 fi
 
-# Always fix line endings (whether cloned, updated, or already current)
-echo ""
-echo "→ Fixing line endings..."
-sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
-chmod +x setup-factory-vm.sh
+# Download latest setup script
+echo "→ Downloading latest setup script..."
+if curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh" -o setup-factory-vm.sh.tmp; then
+    mv setup-factory-vm.sh.tmp setup-factory-vm.sh
+    chmod +x setup-factory-vm.sh
+    
+    # Fix line endings
+    sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
+    
+    echo "✓ Setup script downloaded"
+else
+    echo "ERROR: Failed to download setup script"
+    exit 1
+fi
 
+echo ""
 echo "→ Starting installation..."
 echo ""
 
