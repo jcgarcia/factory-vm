@@ -32,7 +32,7 @@ fi
 
 # Download latest setup script
 echo "→ Downloading latest setup script..."
-if curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh" -o setup-factory-vm.sh.tmp; then
+if curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh?nocache=$(date +%s)" -o setup-factory-vm.sh.tmp; then
     mv setup-factory-vm.sh.tmp setup-factory-vm.sh
     chmod +x setup-factory-vm.sh
     
