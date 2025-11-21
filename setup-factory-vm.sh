@@ -1,4 +1,5 @@
 #!/bin/bash
+# Version: 2.1.0
 
 ################################################################################
 # Factory VM - Fully Automated Setup
@@ -34,6 +35,46 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+################################################################################
+# Auto-update Check
+################################################################################
+
+check_for_updates() {
+    local repo_url="https://raw.githubusercontent.com/jcgarcia/factory-vm/main"
+    local temp_file=$(mktemp)
+    
+    echo "Checking for script updates..."
+    
+    if curl -sSL "$repo_url/setup-factory-vm.sh" -o "$temp_file" 2>/dev/null; then
+        local local_version=$(grep -m1 '^# Version:' "${BASH_SOURCE[0]}" 2>/dev/null | awk -F': ' '{print $2}' || echo "unknown")
+        local remote_version=$(grep -m1 '^# Version:' "$temp_file" 2>/dev/null | awk -F': ' '{print $2}' || echo "unknown")
+        
+        if [[ "$local_version" != "$remote_version" && "$remote_version" != "unknown" ]]; then
+            echo ""
+            echo "========================================"
+            echo "  UPDATE AVAILABLE"
+            echo "========================================"
+            echo ""
+            echo "  Current version: $local_version"
+            echo "  Latest version:  $remote_version"
+            echo ""
+            echo "  To update, run the one-liner installer:"
+            echo "  curl -fsSL https://raw.githubusercontent.com/jcgarcia/factory-vm/main/install.sh | bash"
+            echo ""
+            echo "  Or manually update this file from GitHub."
+            echo ""
+            echo "========================================"
+            echo ""
+            sleep 3
+        fi
+    fi
+    
+    rm -f "$temp_file"
+}
+
+# Check for updates (non-blocking, continues even if check fails)
+check_for_updates || true
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
