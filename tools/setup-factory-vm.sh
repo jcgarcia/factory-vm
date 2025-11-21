@@ -1992,6 +1992,12 @@ start() {
         echo "No cached image found, pulling from Docker Hub..."
         echo "This may take 10-20 minutes on slow connections..."
         docker pull jenkins/jenkins:lts-jdk21
+        
+        # Save to cache for next time (on data disk, persists across rebuilds)
+        echo "Saving Jenkins image to cache for future installations..."
+        mkdir -p /var/cache/factory-build
+        docker save jenkins/jenkins:lts-jdk21 -o /var/cache/factory-build/jenkins-image.tar
+        echo "Jenkins image cached successfully!"
     fi
     
     # Start Jenkins without plugins (plugins will be installed after Jenkins is running)
