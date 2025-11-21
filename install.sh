@@ -28,11 +28,26 @@ if [ -d "$REPO_DIR" ]; then
     # Check if it's actually a git repository
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         echo "⚠ Warning: Directory exists but is not a git repository"
-        echo "→ Removing and cloning fresh..."
+        echo "→ Preserving cache and cloning fresh..."
         cd "$HOME"
+        
+        # Preserve cache if it exists
+        if [ -d "$REPO_DIR/cache" ]; then
+            echo "→ Backing up cache..."
+            mv "$REPO_DIR/cache" "$HOME/.factory-cache-backup"
+        fi
+        
+        # Remove directory and clone fresh
         rm -rf "$REPO_DIR"
         git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
         cd "$REPO_DIR"
+        
+        # Restore cache
+        if [ -d "$HOME/.factory-cache-backup" ]; then
+            echo "→ Restoring cache..."
+            mv "$HOME/.factory-cache-backup" "$REPO_DIR/cache"
+        fi
+        
         echo "✓ Repository cloned"
         echo ""
         echo "→ Starting installation..."
