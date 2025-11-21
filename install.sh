@@ -81,19 +81,8 @@ if [ -d "$REPO_DIR" ]; then
         echo ""
         echo "→ Pulling latest changes..."
         
-        # Switch to branch if needed
-        if [ "$current_branch" != "$BRANCH" ]; then
-            git checkout "$BRANCH" --quiet
-        fi
-        
-        # Stash any local changes to cache
-        if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo "→ Preserving local cache..."
-            git stash --quiet
-        fi
-        
-        # Pull updates
-        git pull origin "$BRANCH" --quiet
+        # Reset to match remote exactly (ignore local line ending changes)
+        git reset --hard "origin/$BRANCH" --quiet
         
         echo "✓ Repository updated!"
     fi
