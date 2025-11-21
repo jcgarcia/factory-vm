@@ -97,17 +97,19 @@ ssh factory
 - **User**: `foreman` (admin role, auto-generated password saved to `~/vms/factory/jenkins-credentials.txt`)
 
 ### Container & Orchestration
-- Docker 25.0.5
-- Kubernetes (kubectl 1.28.4)
-- Helm 3.13.3
+- Docker (latest stable)
+- Kubernetes (kubectl - latest stable)
+- Helm (latest stable)
 
 ### Infrastructure as Code
-- Terraform 1.6.6
+- Terraform (latest stable)
 - Jenkins Configuration as Code (JCasC)
 
 ### Cloud Tools
-- AWS CLI 2.15.14
+- AWS CLI v2 (latest)
 - jcscripts (awslogin)
+
+> **Note**: All tool versions are automatically detected and installed during setup. The installer always fetches the latest stable versions available at installation time.
 # Should output: aarch64
 ```
 
