@@ -2877,7 +2877,7 @@ if [ -z "$PID" ]; then
         echo "  ${VM_DIR}/start-factory.sh"
         exit 1
     fi
-elif ! sudo kill -0 $PID 2>/dev/null; then
+elif ! ps -p "$PID" > /dev/null 2>&1; then
     echo -e "${RED}✗ VM process not found (stale PID file)${NC}"
     echo "  PID file exists but process $PID is not running"
     sudo rm -f "$PID_FILE" 2>/dev/null || rm -f "$PID_FILE" 2>/dev/null
