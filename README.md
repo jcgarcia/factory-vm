@@ -2,6 +2,8 @@
 
 **Production-ready ARM64 virtual machine with Jenkins, Docker, Kubernetes, and complete DevOps toolchain.**
 
+![Factory](TheFactory.png)
+
 ## 🚀 Quick Start
 
 ### Prerequisites
