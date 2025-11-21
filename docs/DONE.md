@@ -9,7 +9,7 @@ From your message:
 > Then create a function on .bashrc to make it easier to use
 >
 > jenkins-factory() {
->     java -jar ~/jenkins-cli-factory.jar -s https://factory.local/ -http -auth foreman:11818b124bee61ba85e7685f596fc0dd12 "$@"
+>     java -jar ~/jenkins-cli-factory.jar -s https://factory.local/ -http -auth foreman:YOUR_API_TOKEN_HERE "$@"
 > }
 >
 > Then we need to create a user foreman in the jenkins server, same as I have my user on my jenkins server in the cloud (see the image)
@@ -61,15 +61,15 @@ jenkins-factory() {
 ### 3. ✅ Foreman User Created in Jenkins
 **Created by**: `05-create-foreman-user.groovy` init script  
 **Username**: `foreman`  
-**Password**: `foreman123`  
+**Password**: Auto-generated (stored securely, see credentials.txt)  
 **Permissions**: Full administrative access (same as admin)  
 **Location**: `/opt/jenkins/init.groovy.d/05-create-foreman-user.groovy`
 
 **Groovy Implementation**:
 ```groovy
-// Creates user with password
+// Creates user with auto-generated password
 def hudsonRealm = new HudsonPrivateSecurityRealm(false)
-hudsonRealm.createAccount('foreman', 'foreman123')
+hudsonRealm.createAccount('foreman', env.JENKINS_FOREMAN_PASSWORD)
 instance.setSecurityRealm(hudsonRealm)
 
 // Get the user
@@ -90,7 +90,7 @@ new File('/var/jenkins_home/foreman-api-token.txt').text = tokenValue
 - **In Jenkins**: `/var/jenkins_home/foreman-api-token.txt`
 - **On Host**: `~/.jenkins-factory-token` (600 permissions)
 
-**Token format**: Jenkins API token (hex string, e.g., `11818b124bee61ba85e7685f596fc0dd12`)
+**Token format**: Jenkins API token (32-character hex string, auto-generated during installation)
 
 ### 5. ✅ Everything Documented
 

@@ -541,7 +541,7 @@ Steps now performed in correct order with verification:
 
 **Foreman User**
 - Username: `foreman`
-- Password: `foreman123`
+- Password: Auto-generated (saved to `~/.factory-vm/credentials.txt`)
 - Role: Full administrative access
 - API Token: Auto-generated during installation
 - Token storage: `/var/jenkins_home/foreman-api-token.txt` (Jenkins) and `~/.jenkins-factory-token` (host)
