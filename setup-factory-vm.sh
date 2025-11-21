@@ -2451,7 +2451,7 @@ EOF
     local ssh_ready=0
     for i in {1..30}; do
         if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 -p "$VM_SSH_PORT" root@localhost "echo OK" >/dev/null 2>&1; then
+            -o ConnectTimeout=5 -p "$VM_SSH_PORT" foreman@localhost "echo OK" >/dev/null 2>&1; then
             ssh_ready=1
             break
         fi
@@ -2459,14 +2459,14 @@ EOF
     done
     
     if [ $ssh_ready -eq 0 ]; then
-        log_error "SSH did not become ready in time"
+        log_error "SSH did not become ready for foreman user in time"
         exit 1
     fi
     
     log_success "SSH is ready"
     
     # Give SSH/SCP a bit more time to fully stabilize after restart
-    sleep 10
+    sleep 5
 
     # Copy and run setup script
     log "Installing build tools..."
