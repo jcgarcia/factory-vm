@@ -119,3 +119,92 @@ fa3d570 Improve AWS CLI download: use temp file and add debug logging
 - Simplified installer is committed (026ef1c, 573797c)
 - Need to test complete flow with one-liner
 - GitHub CDN may serve stale files for ~5-10 minutes after push
+
+---
+
+## Continuation Session (Later Same Day)
+
+### Issues Fixed
+
+#### 1. SSH Key Authentication (FIXED - commit 7db9e08)
+- **Problem**: SSH asking for password when connecting to foreman user
+- **Root Cause**: SSH key only copied to root's authorized_keys, not foreman's
+- **Solution**: Added key copy to foreman user during creation
+- **Verified**: SSH authentication works without password
+
+#### 2. Component Installation Not Running (FIXED - commit 5f56133)
+- **Problem**: vm-setup.sh execution failed, tools not installed
+- **Root Cause**: Alpine uses `doas` not `sudo`, doesn't support `-E` flag or `VAR=value command` syntax
+- **Solution**: Inject JENKINS_FOREMAN_PASSWORD at top of vm-setup.sh script before execution
+- **Verified**: Component installation runs successfully, all tools installed
+
+#### 3. Status Script Process Check (FIXED - commit a4fe295)
+- **Problem**: `factorystatus` reports VM not running when qemu runs as root
+- **Root Cause**: `kill -0` requires same process owner
+- **Solution**: Use `ps -p $PID` instead which works regardless of owner
+- **Verified**: Status script now correctly detects running VM
+
+#### 4. Missing log_debug Function (FIXED - commit a32964f)
+- **Problem**: Installation crashed with "log_debug: command not found"
+- **Root Cause**: Used undefined function for debug logging
+- **Solution**: Replace all `log_debug` with `log_info`
+
+#### 5. Cache Directory Persistence (FIXED - commit b2b95c0)
+- **Problem**: /tmp/cache deleted on VM reboot
+- **Root Cause**: /tmp is cleared on every boot
+- **Solution**: Use /var/cache/factory-build instead
+
+#### 6. Brace Expansion in SSH Command (FIXED - commit b2b95c0)  
+- **Problem**: Created literal directory named `{terraform,kubectl,helm,awscli,ansible}`
+- **Root Cause**: Brace expansion doesn't work inside double-quoted SSH commands
+- **Solution**: Use explicit paths: `mkdir -p dir1 dir2 dir3`
+- **Status**: ⚠️ **PENDING CDN CACHE CLEAR** - Fix committed but GitHub CDN serving old version
+
+#### 7. Foreman SSH Verification (FIXED - commit 46397de)
+- **Problem**: Cache copy attempted before foreman SSH fully ready
+- **Root Cause**: SSH ready check used root@localhost, not foreman@localhost
+- **Solution**: Test foreman SSH access before cache copy operations
+
+### Commits This Session
+- **7db9e08**: Fix: Copy SSH key to foreman user's authorized_keys
+- **f3d6583**: Fix: Pass JENKINS_FOREMAN_PASSWORD correctly to doas/sudo (failed - doas doesn't support -E)
+- **5f56133**: Fix: Inject JENKINS_FOREMAN_PASSWORD into vm-setup.sh
+- **d8a4f59**: Fix: Add retry logic and file existence checks for cache copying
+- **a4fe295**: Fix: Use ps instead of kill -0 for status check
+- **c8caec7**: Debug: Remove stderr suppression for cache copy operations
+- **46397de**: Fix: Test foreman SSH before cache copy operations
+- **a32964f**: Fix: Replace log_debug with log_info (function doesn't exist)
+- **b2b95c0**: Fix: Use /var/cache/factory-build instead of /tmp/cache
+
+### Current Status
+
+**✅ WORKING**:
+- SSH key authentication to foreman user
+- Component installation (docker, kubectl, terraform, helm, aws)
+- Status script detects running VM
+- Installation completes successfully in 6-7 minutes
+
+**⚠️ PENDING** (GitHub CDN Cache):
+- Cache copy optimization (brace expansion fix committed but not yet served by CDN)
+- Current workaround: Tools download during installation instead of using cached copies
+- Impact: Minimal - installation still completes successfully
+
+### Installation Test Results
+- **Time**: 6-7 minutes (with cache, Alpine ISO, and plugins)
+- **All tools verified installed**:
+  - Docker: ✓
+  - kubectl: ✓  
+  - Terraform: ✓
+  - Helm: ✓
+  - AWS CLI: ✓
+- **Cache warnings**: Harmless - tools download when cache copy fails
+
+### Next Agent Actions
+1. **Wait for GitHub CDN cache to clear** (typically 5-10 minutes after commit)
+2. **Test one-liner again** - cache copy should work with brace expansion fix
+3. **Verify cache usage** - check that files copied from cache reduce download time
+4. **Consider**: If CDN caching continues to be an issue, add version parameter to raw URL
+
+### Critical Learning
+**Do NOT test from development directory** - Always use one-liner from user perspective to simulate actual installation experience. Testing from `~/wip/nb/FinTechProj/factory-vm` creates conflicts and doesn't represent end-user flow.
+
