@@ -2450,6 +2450,9 @@ EOF
     fi
     
     log_success "SSH is ready"
+    
+    # Give SSH/SCP a bit more time to fully stabilize after restart
+    sleep 10
 
     # Copy and run setup script
     log "Installing build tools..."
