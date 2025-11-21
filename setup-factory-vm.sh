@@ -2478,34 +2478,52 @@ EOF
     log_info "Copying cached installation files to VM..."
     
     # Create cache directory structure in VM - retry if SSH not ready
+    log_debug "Creating cache directories in VM..."
     for i in 1 2 3; do
         if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /tmp/cache/{terraform,kubectl,helm,awscli,ansible} && sudo chown -R foreman:foreman /tmp/cache" 2>/dev/null; then
+            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /tmp/cache/{terraform,kubectl,helm,awscli,ansible} && sudo chown -R foreman:foreman /tmp/cache"; then
+            log_debug "Cache directories created successfully"
             break
         else
-            [ $i -lt 3 ] && sleep 2
+            log_debug "Attempt $i failed, retrying..."
+            [ $i -lt 3 ] && sleep 3
         fi
     done
     
     # Copy terraform
     if [ -f "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" ]; then
-        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        log_debug "Copying Terraform from cache..."
+        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" \
-            foreman@localhost:/tmp/cache/terraform/ 2>/dev/null || log_warning "Terraform cache copy failed (will download in VM)"
+            foreman@localhost:/tmp/cache/terraform/; then
+            log_debug "✓ Terraform cached copy successful"
+        else
+            log_warning "Terraform cache copy failed (will download in VM)"
+        fi
     fi
     
     # Copy kubectl
     if [ -f "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" ]; then
-        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        log_debug "Copying kubectl from cache..."
+        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" \
-            foreman@localhost:/tmp/cache/kubectl/kubectl 2>/dev/null || log_warning "kubectl cache copy failed (will download in VM)"
+            foreman@localhost:/tmp/cache/kubectl/kubectl; then
+            log_debug "✓ kubectl cached copy successful"
+        else
+            log_warning "kubectl cache copy failed (will download in VM)"
+        fi
     fi
     
     # Copy helm
     if [ -f "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" ]; then
-        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        log_debug "Copying Helm from cache..."
+        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
-            foreman@localhost:/tmp/cache/helm/ 2>/dev/null || log_warning "Helm cache copy failed (will download in VM)"
+            foreman@localhost:/tmp/cache/helm/; then
+            log_debug "✓ Helm cached copy successful"
+        else
+            log_warning "Helm cache copy failed (will download in VM)"
+        fi
     fi
     
     # Copy AWS CLI if cached
