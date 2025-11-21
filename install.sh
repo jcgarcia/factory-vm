@@ -90,6 +90,10 @@ else
 fi
 
 echo ""
+echo "→ Fixing line endings..."
+sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
+chmod +x setup-factory-vm.sh
+
 echo "→ Starting installation..."
 echo ""
 
