@@ -1060,9 +1060,21 @@ create_disks() {
         log "  ✓ System disk exists"
     fi
     
+    # Check for preserved data disk from previous test
+    local data_disk_backup="${HOME}/.factory-vm-data-backup.qcow2"
+    
     if [ ! -f "$DATA_DISK" ]; then
-        qemu-img create -f qcow2 "$DATA_DISK" "$DATA_DISK_SIZE"
-        log "  ✓ Data disk created (${DATA_DISK_SIZE})"
+        # Check if we have a preserved data disk to restore
+        if [ -f "$data_disk_backup" ]; then
+            log_info "Restoring preserved data disk from previous installation..."
+            cp "$data_disk_backup" "$DATA_DISK"
+            rm -f "$data_disk_backup"
+            local size=$(du -h "$DATA_DISK" | cut -f1)
+            log_success "Data disk restored (${size}) - cache will be reused!"
+        else
+            qemu-img create -f qcow2 "$DATA_DISK" "$DATA_DISK_SIZE"
+            log "  ✓ Data disk created (${DATA_DISK_SIZE})"
+        fi
     else
         log "  ✓ Data disk exists"
     fi
