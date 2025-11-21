@@ -82,17 +82,24 @@ if [ -d "$REPO_DIR" ]; then
         
         echo "✓ Repository updated!"
     fi
+    
+    # Fix line endings after update
+    echo ""
+    echo "→ Fixing line endings..."
+    sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
+    chmod +x setup-factory-vm.sh
 else
     echo "→ Cloning repository..."
     git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
     cd "$REPO_DIR"
     echo "✓ Repository cloned"
+    
+    # Fix line endings after clone
+    echo ""
+    echo "→ Fixing line endings..."
+    sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
+    chmod +x setup-factory-vm.sh
 fi
-
-echo ""
-echo "→ Fixing line endings..."
-sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
-chmod +x setup-factory-vm.sh
 
 echo "→ Starting installation..."
 echo ""
