@@ -2031,25 +2031,6 @@ JENKINS_ENV
     echo ""
     echo "  ✓ Step 5/6 complete: Plugin installation deferred to host"
     echo ""
-        
-        # Wait for Jenkins to come back up
-        echo -n "  - Waiting for Jenkins restart..."
-        for i in {1..30}; do
-            if docker exec jenkins test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
-                echo " ✓"
-                break
-            fi
-            if [ \$i -eq 30 ]; then
-                echo " ⚠ (timeout)"
-            fi
-            sleep 2
-        done
-        
-        echo "  ✓ Plugins installed"
-    else
-        echo "  - No plugins.txt found, skipping plugin installation"
-    fi
-    echo ""
     
     echo "  Step 6/6: Setting up Jenkins CLI..."
     
