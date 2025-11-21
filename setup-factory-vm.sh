@@ -2522,14 +2522,16 @@ EOF
     # This allows slow downloads (Android SDK, etc.) to complete without aborting entire install
     # Pass Jenkins foreman password as environment variable (secure - not visible in process list)
     # Use -tt to force pseudo-terminal allocation for real-time output (no buffering)
+    # Export variable before SSH so it's available to the remote script via sudo
+    export JENKINS_FOREMAN_PASSWORD
     if ssh -tt -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=60 -o ServerAliveInterval=30 -p "$VM_SSH_PORT" foreman@localhost \
-        "sudo JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}' bash /tmp/vm-setup.sh" ; then
+        "export JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}' && sudo -E bash /tmp/vm-setup.sh" ; then
         log "  ✓ Build tools installed successfully"
     else
         log_warning "Tool installation had some errors, but VM may still be usable"
         log_info "Check installation log: ssh factory 'cat /root/factory-install.log'"
-        log_info "You can retry failed components: ssh factory 'sudo JENKINS_FOREMAN_PASSWORD=<password> bash /tmp/vm-setup.sh'"
+        log_info "You can retry failed components: ssh factory 'export JENKINS_FOREMAN_PASSWORD=<password> && sudo -E bash /tmp/vm-setup.sh'"
     fi
     
     # Setup Jenkins CLI while VM is still running
