@@ -55,7 +55,7 @@ Installation takes ~15-20 minutes and sets up everything automatically:
 
 ### Access Jenkins
 
-After installation completes, check `~/vms/factory/jenkins-credentials.txt` for your auto-generated password.
+After installation completes, check `~/.factory-vm/credentials.txt` for your auto-generated password.
 
 **Web UI**:
 ```bash
@@ -63,7 +63,7 @@ After installation completes, check `~/vms/factory/jenkins-credentials.txt` for 
 https://factory.local
 
 # Login credentials are in:
-cat ~/vms/factory/jenkins-credentials.txt
+cat ~/.factory-vm/credentials.txt
 ```
 
 **CLI** (from host machine):
@@ -94,7 +94,7 @@ ssh factory
 - **Agent**: factory-agent-1 (2 executors, ARM64, Docker, K8s)
 - **Plugins**: 25+ essential plugins pre-installed
 - **SSL**: HTTPS with trusted certificates
-- **User**: `foreman` (admin role, auto-generated password saved to `~/vms/factory/jenkins-credentials.txt`)
+- **User**: `foreman` (admin role, auto-generated password saved to `~/.factory-vm/credentials.txt`)
 
 ### Container & Orchestration
 - Docker (latest stable)
@@ -138,21 +138,23 @@ Comprehensive guides are available:
 
 ## 🔧 VM Management
 
-### Start VM
+### Convenience Commands
+
+Simplest way to manage the VM:
+
+```bash
+factorystart    # Start the VM
+factorystop     # Stop the VM
+factorystatus   # Check VM status
+```
+
+### Direct Scripts
+
+Alternatively, use the scripts directly:
 
 ```bash
 ~/vms/factory/start-factory.sh
-```
-
-### Stop VM
-
-```bash
 ~/vms/factory/stop-factory.sh
-```
-
-### Check Status
-
-```bash
 ~/vms/factory/status-factory.sh
 ```
 
@@ -258,7 +260,7 @@ localhost:2222 ─────────────────> SSH :22
 - Password: Auto-generated during installation
 - API Token: Auto-generated
 - Token Location: `~/.jenkins-factory-token`
-- Credentials saved to: `~/vms/factory/jenkins-credentials.txt`
+- Credentials saved to: `~/.factory-vm/credentials.txt`
 
 **VM SSH**:
 - Username: `foreman`
@@ -487,33 +489,56 @@ Optional components can be installed if needed:
 ## 📝 Files and Directories
 
 ```
-factory-vm/
-├── setup-factory-vm.sh           # Main installation script
+factory-vm/ (repository)
+├── install.sh                     # One-liner entry point
+├── setup-factory-vm.sh            # Main installation script
 ├── alpine-install.exp             # Alpine automated install
-├── start-factory.sh               # VM start script template
-├── stop-factory.sh                # VM stop script template
-├── status-factory.sh              # VM status check template
 ├── README.md                      # This file
-├── JENKINS-CONFIGURATION.md       # Jenkins setup guide
-├── JENKINS-CLI.md                 # CLI usage guide
-├── JENKINS-CLI-IMPLEMENTATION.md  # Technical details
-└── CHANGELOG.md                   # Version history
+├── CHANGELOG.md                   # Version history
+├── QUICK-START.md                 # Quick reference guide
+└── [documentation files]          # JENKINS-*, SECURITY-*, etc.
 
-~/vms/factory/
-├── alpine-arm64.qcow2            # System disk (50GB)
-├── alpine-data.qcow2             # Data disk (200GB)
-├── start-factory.sh              # Start VM script
-├── stop-factory.sh               # Stop VM script
-├── status-factory.sh             # Status check script
-├── setup-jenkins-cli.sh          # Jenkins CLI setup
-├── install-android-sdk.sh        # Optional: Android SDK
-└── install-ansible.sh            # Optional: Ansible
+~/factory-vm/ (local installation)
+├── setup-factory-vm.sh            # Downloaded installer
+├── alpine-install.exp             # Downloaded expect script
+└── cache/                         # Cached downloads (preserved)
+    ├── alpine/                    # Alpine ISO
+    ├── terraform/                 # Terraform binaries
+    ├── kubectl/                   # kubectl binaries
+    ├── helm/                      # Helm archives
+    ├── awscli/                    # AWS CLI installer
+    ├── ansible/                   # Ansible requirements
+    └── jenkins/plugins/           # Jenkins plugins
+
+~/vms/factory/ (VM directory)
+├── factory.qcow2                  # System disk (50GB)
+├── factory-data.qcow2             # Data disk (200GB)
+├── factory.pid                    # VM process ID
+├── start-factory.sh               # Start VM script
+├── stop-factory.sh                # Stop VM script
+├── status-factory.sh              # Status check script
+├── setup-jenkins-cli.sh           # Jenkins CLI setup
+├── install-android-sdk.sh         # Optional: Android SDK
+├── install-ansible.sh             # Optional: Ansible
+├── vm-setup.sh                    # VM configuration script
+└── FACTORY-README.md              # VM documentation
+
+~/.factory-vm/
+└── credentials.txt                # Jenkins & VM passwords
 
 ~/.ssh/
-└── factory-foreman               # SSH private key
+└── factory-foreman                # SSH private key (ed25519)
 
-~/.jenkins-factory-token          # Jenkins CLI API token
-~/jenkins-cli-factory.jar         # Jenkins CLI executable
+~/.ssh/config.d/
+└── factory                        # SSH alias configuration
+
+~/.scripts/ (convenience commands)
+├── factorystart -> ~/vms/factory/start-factory.sh
+├── factorystop -> ~/vms/factory/stop-factory.sh
+└── factorystatus -> ~/vms/factory/status-factory.sh
+
+~/.jenkins-factory-token           # Jenkins CLI API token
+~/jenkins-cli-factory.jar          # Jenkins CLI executable
 ```
 
 ## 🔮 Roadmap
