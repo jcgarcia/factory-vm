@@ -26,11 +26,13 @@ mkdir -p "$REPO_DIR"
 cd "$REPO_DIR"
 
 # Preserve existing cache
+CACHE_PRESERVED=0
 if [ -d "cache" ]; then
     echo "→ Preserving existing cache..."
+    CACHE_PRESERVED=1
 fi
 
-# Download latest setup script
+# Download latest setup script (always get fresh version)
 echo "→ Downloading latest setup script..."
 if curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh?nocache=$(date +%s)" -o setup-factory-vm.sh.tmp; then
     mv setup-factory-vm.sh.tmp setup-factory-vm.sh
@@ -43,6 +45,11 @@ if curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh?nocache=$(date +%s)" -o setu
 else
     echo "ERROR: Failed to download setup script"
     exit 1
+fi
+
+# Notify about cache preservation
+if [ $CACHE_PRESERVED -eq 1 ]; then
+    echo "✓ Local cache preserved and will be used"
 fi
 
 echo ""
