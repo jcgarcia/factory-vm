@@ -2064,7 +2064,8 @@ JENKINS_ENV
     START_TIME=\$(date +%s)
     echo -n "    Progress: "
     for i in {1..90}; do
-        if docker exec jenkins test -f /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null; then
+        # Check if Jenkins HTTP API is responding (don't check initialAdminPassword - we skip wizard)
+        if curl -s http://localhost:8080/api/json >/dev/null 2>&1; then
             ELAPSED=\$((\$(date +%s) - START_TIME))
             echo ""
             echo "  ✓ Jenkins is ready! (took \${ELAPSED} seconds)"
