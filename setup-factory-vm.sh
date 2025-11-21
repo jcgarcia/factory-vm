@@ -2371,6 +2371,11 @@ ln -sf /usr/bin/doas /usr/bin/sudo
 mkdir -p /home/foreman/.ssh
 chmod 700 /home/foreman/.ssh
 
+# Copy SSH key from root to foreman
+cp /root/.ssh/authorized_keys /home/foreman/.ssh/authorized_keys
+chmod 600 /home/foreman/.ssh/authorized_keys
+chown -R foreman:foreman /home/foreman/.ssh
+
 # Set bash as default shell
 apk add bash
 sed -i 's|/home/foreman:/bin/ash|/home/foreman:/bin/bash|' /etc/passwd
