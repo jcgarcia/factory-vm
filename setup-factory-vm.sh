@@ -2465,50 +2465,52 @@ EOF
     
     # Create cache directory structure in VM
     ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        -p "$VM_SSH_PORT" root@localhost "mkdir -p /tmp/cache/{terraform,kubectl,helm,awscli,ansible}" 2>/dev/null || true
+        -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /tmp/cache/{terraform,kubectl,helm,awscli,ansible} && sudo chown -R foreman:foreman /tmp/cache" 2>/dev/null || true
     
     # Copy terraform
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" \
-        root@localhost:/tmp/cache/terraform/ 2>/dev/null || log_warning "Terraform cache copy failed (will download in VM)"
+        foreman@localhost:/tmp/cache/terraform/ 2>/dev/null || log_warning "Terraform cache copy failed (will download in VM)"
     
     # Copy kubectl
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" \
-        root@localhost:/tmp/cache/kubectl/kubectl 2>/dev/null || log_warning "kubectl cache copy failed (will download in VM)"
+        foreman@localhost:/tmp/cache/kubectl/kubectl 2>/dev/null || log_warning "kubectl cache copy failed (will download in VM)"
     
     # Copy helm
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
-        root@localhost:/tmp/cache/helm/ 2>/dev/null || log_warning "Helm cache copy failed (will download in VM)"
+        foreman@localhost:/tmp/cache/helm/ 2>/dev/null || log_warning "Helm cache copy failed (will download in VM)"
     
     # Copy AWS CLI if cached
     if [ -f "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" ]; then
         scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" \
-            root@localhost:/tmp/cache/awscli/ 2>/dev/null || log_warning "AWS CLI cache copy failed (will use apk)"
+            foreman@localhost:/tmp/cache/awscli/ 2>/dev/null || log_warning "AWS CLI cache copy failed (will use apk)"
     fi
     
     # Copy Ansible requirements if cached
     if [ -f "${CACHE_DIR}/ansible/ansible-requirements.txt" ]; then
         scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/ansible/ansible-requirements.txt" \
-            root@localhost:/tmp/cache/ansible/ 2>/dev/null || true
+            foreman@localhost:/tmp/cache/ansible/ 2>/dev/null || true
     fi
     
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
     # This is more reliable than copying .hpi files and allows using cached plugins from host
     
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        "${VM_DIR}/vm-setup.sh" root@localhost:/tmp/
+        "${VM_DIR}/vm-setup.sh" foreman@localhost:/tmp/ && \
+    ssh -i "$VM_SSH_PRIVATE_KEY" -p "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        foreman@localhost "sudo chown root:root /tmp/vm-setup.sh"
     
     # Run setup script WITHOUT outer timeout - script handles its own timeouts per component
     # This allows slow downloads (Android SDK, etc.) to complete without aborting entire install
     # Pass Jenkins foreman password as environment variable (secure - not visible in process list)
     # Use -tt to force pseudo-terminal allocation for real-time output (no buffering)
     if ssh -tt -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        -o ConnectTimeout=60 -o ServerAliveInterval=30 -p "$VM_SSH_PORT" root@localhost \
-        "JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}' bash /tmp/vm-setup.sh" ; then
+        -o ConnectTimeout=60 -o ServerAliveInterval=30 -p "$VM_SSH_PORT" foreman@localhost \
+        "sudo JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}' bash /tmp/vm-setup.sh" ; then
         log "  ✓ Build tools installed successfully"
     else
         log_warning "Tool installation had some errors, but VM may still be usable"
