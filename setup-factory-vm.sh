@@ -3248,6 +3248,11 @@ setup_jenkins_cli() {
         fi
         
         # Install to system trust store (REQUIRED for curl/wget to trust HTTPS)
+        # CRITICAL: Remove ALL old Caddy certificates first (certs change on every VM start)
+        log_info "    Removing old Caddy certificates from system trust store..."
+        sudo rm -f /usr/local/share/ca-certificates/caddy*.crt 2>/dev/null || true
+        sudo update-ca-certificates --fresh >/dev/null 2>&1
+        
         if sudo cp "$root_cert_file" /usr/local/share/ca-certificates/caddy-factory-ca.crt 2>/dev/null; then
             # Also install intermediate
             sudo cp "$intermediate_cert_file" /usr/local/share/ca-certificates/caddy-intermediate-ca.crt 2>/dev/null || true
