@@ -174,6 +174,9 @@ download_and_cache_helm() {
 download_and_cache_awscli() {
     local cache_file="${CACHE_DIR}/awscli/awscli-latest-aarch64.zip"
     
+    # Debug: Show what we're looking for
+    [ "$DEBUG" = "1" ] && echo "[DEBUG] Checking for AWS CLI cache at: $cache_file" >&2
+    
     if [ -f "$cache_file" ]; then
         log_info "AWS CLI already cached"
         return 0
@@ -181,10 +184,16 @@ download_and_cache_awscli() {
     
     log_info "Downloading AWS CLI v2..."
     mkdir -p "${CACHE_DIR}/awscli"
+    
+    # Use temporary file to avoid partial downloads
+    local temp_file="${cache_file}.tmp"
     if curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" \
-        -o "$cache_file"; then
+        -o "$temp_file" && [ -s "$temp_file" ]; then
+        mv "$temp_file" "$cache_file"
         log_success "AWS CLI cached"
+        return 0
     else
+        rm -f "$temp_file"
         log_error "Failed to download AWS CLI"
         return 1
     fi
