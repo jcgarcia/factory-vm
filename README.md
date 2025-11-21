@@ -8,23 +8,25 @@
 
 ### Prerequisites
 
-The installer needs QEMU to run the ARM64 virtual machine:
+The installer needs QEMU and skopeo:
 
 **Ubuntu/Debian**:
 ```bash
 sudo apt-get update
-sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 qemu-utils
+sudo apt-get install -y qemu-system-arm qemu-efi-aarch64 qemu-utils skopeo
 ```
 
 **RHEL/Rocky/AlmaLinux**:
 ```bash
-sudo dnf install -y qemu-system-aarch64 qemu-efi-aarch64 qemu-img
+sudo dnf install -y qemu-system-aarch64 qemu-efi-aarch64 qemu-img skopeo
 ```
 
 **Arch Linux**:
 ```bash
-sudo pacman -S qemu-system-aarch64 edk2-armvirt
+sudo pacman -S qemu-system-aarch64 edk2-armvirt skopeo
 ```
+
+**Note**: `skopeo` is used to download and cache the Jenkins Docker image on the host without requiring Docker. If skopeo is not available, Jenkins will still work but the image will be downloaded inside the VM (slower, ~10 minutes on first install).
 
 ### One-Liner Installation
 

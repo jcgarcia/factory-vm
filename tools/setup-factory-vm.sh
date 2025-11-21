@@ -262,6 +262,37 @@ EOF
     return 0
 }
 
+download_and_cache_jenkins_image() {
+    local cache_file="${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar"
+    
+    if [ -f "$cache_file" ]; then
+        log_info "Jenkins Docker image already cached"
+        return 0
+    fi
+    
+    log_info "Downloading Jenkins Docker image (jenkins/jenkins:lts-jdk21)..."
+    log_info "This is a ~1.5GB download, will take 8-10 minutes on first run"
+    mkdir -p "${CACHE_DIR}/jenkins"
+    
+    # Use skopeo to download Docker image without requiring Docker daemon
+    if command -v skopeo &>/dev/null; then
+        # Download using skopeo and convert to docker-archive format
+        local temp_dir="$(mktemp -d)"
+        if skopeo copy docker://jenkins/jenkins:lts-jdk21 docker-archive:"$cache_file" 2>/dev/null; then
+            rm -rf "$temp_dir"
+            log_success "Jenkins image cached ($(du -h "$cache_file" | cut -f1))"
+            return 0
+        else
+            rm -rf "$temp_dir" "$cache_file"
+            log_error "Failed to download Jenkins image with skopeo"
+            return 1
+        fi
+    else
+        log_warning "skopeo not found, Jenkins image will be downloaded in VM"
+        return 1
+    fi
+}
+
 cache_all_tools() {
     log "Downloading and caching installation files..."
     log_info "First-time downloads will be cached for faster subsequent installations"
@@ -289,6 +320,8 @@ cache_all_tools() {
     local awscli_pid=$!
     download_and_cache_ansible &
     local ansible_pid=$!
+    download_and_cache_jenkins_image &
+    local jenkins_pid=$!
     
     # Wait for parallel downloads
     wait $terraform_pid
@@ -296,6 +329,7 @@ cache_all_tools() {
     wait $helm_pid
     wait $awscli_pid
     wait $ansible_pid
+    wait $jenkins_pid
     
     log_success "All tools cached and ready for installation"
     echo ""
@@ -1984,20 +2018,14 @@ start() {
     fi
     
     # Load cached Jenkins image if available, otherwise pull from internet
-    if [ -f /var/cache/factory-build/jenkins-image.tar ]; then
+    if [ -f /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar ]; then
         echo "Loading Jenkins Docker image from cache..."
-        docker load -i /var/cache/factory-build/jenkins-image.tar
+        docker load -i /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
         echo "Jenkins image loaded from cache (fast!)"
     else
         echo "No cached image found, pulling from Docker Hub..."
         echo "This may take 10-20 minutes on slow connections..."
         docker pull jenkins/jenkins:lts-jdk21
-        
-        # Save to cache for next time (on data disk, persists across rebuilds)
-        echo "Saving Jenkins image to cache for future installations..."
-        mkdir -p /var/cache/factory-build
-        docker save jenkins/jenkins:lts-jdk21 -o /var/cache/factory-build/jenkins-image.tar
-        echo "Jenkins image cached successfully!"
     fi
     
     # Start Jenkins without plugins (plugins will be installed after Jenkins is running)
@@ -2530,7 +2558,7 @@ EOF
     log_info "Creating cache directories in VM..."
     for i in 1 2 3; do
         if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build/terraform /var/cache/factory-build/kubectl /var/cache/factory-build/helm /var/cache/factory-build/awscli /var/cache/factory-build/ansible && sudo chown -R foreman:foreman /var/cache/factory-build"; then
+            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build/terraform /var/cache/factory-build/kubectl /var/cache/factory-build/helm /var/cache/factory-build/awscli /var/cache/factory-build/ansible /var/cache/factory-build/jenkins && sudo chown -R foreman:foreman /var/cache/factory-build"; then
             log_info "Cache directories created successfully"
             break
         else
@@ -2587,6 +2615,18 @@ EOF
         scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/ansible/ansible-requirements.txt" \
             foreman@localhost:/var/cache/factory-build/ansible/ 2>/dev/null || true
+    fi
+    
+    # Copy Jenkins Docker image if cached
+    if [ -f "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" ]; then
+        log_info "Copying Jenkins Docker image from cache (this saves 8-10 minutes)..."
+        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" \
+            foreman@localhost:/var/cache/factory-build/jenkins/ 2>/dev/null; then
+            log_info "✓ Jenkins image cached copy successful (fast install ahead!)"
+        else
+            log_warning "Jenkins image cache copy failed (will download in VM, ~10 minutes)"
+        fi
     fi
     
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
