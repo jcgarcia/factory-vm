@@ -3178,58 +3178,63 @@ setup_jenkins_cli() {
     
     # Step 1: Verify Docker is accessible
     log_info "  Verifying Docker access..."
-    if ! ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
+    local docker_accessible=false
+    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
         "docker ps >/dev/null 2>&1" 2>/dev/null; then
+        docker_accessible=true
+        log_success "  ✓ Docker is accessible"
+    else
         log_warning "  Docker not accessible via SSH"
-        log_info "  Run ~/vms/factory/setup-jenkins-cli.sh later to complete setup"
-        return 0
+        log_info "  Jenkins CLI setup will be skipped"
     fi
     
     # Step 2: Verify Jenkins container is running
-    log_info "  Verifying Jenkins container..."
-    if ! ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
-        "docker ps | grep jenkins" >/dev/null 2>&1; then
-        log_warning "  Jenkins container not running"
-        log_info "  Run ~/vms/factory/setup-jenkins-cli.sh later to complete setup"
-        return 0
+    local jenkins_running=false
+    if [ "$docker_accessible" = "true" ]; then
+        log_info "  Verifying Jenkins container..."
+        if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
+            "docker ps | grep jenkins" >/dev/null 2>&1; then
+            log_success "  ✓ Jenkins container is running"
+            jenkins_running=true
+        else
+            log_warning "  Jenkins container not running"
+            log_info "  Jenkins CLI setup will be skipped"
+        fi
     fi
-    log_success "  ✓ Jenkins container is running"
     
     # Step 3: Wait for Jenkins to be fully ready (foreman user + token created)
-    log_info "  Waiting for Jenkins initialization (foreman user + API token)..."
-    local max_attempts=60
-    local attempt=0
     local jenkins_ready=false
-    
-    while [ $attempt -lt $max_attempts ]; do
-        # Check if foreman user exists (Jenkins appends hash to username)
-        if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
-            "docker exec jenkins ls /var/jenkins_home/users/ 2>/dev/null | grep -q '^foreman_'" 2>/dev/null; then
-            # Check if token exists
-            if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
-                "docker exec jenkins test -f /var/jenkins_home/foreman-api-token.txt 2>/dev/null" 2>/dev/null; then
-                log_success "  ✓ Jenkins is ready (foreman user and token exist)"
-                jenkins_ready=true
-                break
-            fi
-        fi
+    if [ "$jenkins_running" = "true" ]; then
+        log_info "  Waiting for Jenkins initialization (foreman user + API token)..."
+        local max_attempts=60
+        local attempt=0
         
-        ((attempt++))
-        [ $((attempt % 10)) -eq 0 ] && log_info "    Still waiting... (${attempt}/${max_attempts})"
-        sleep 3
-    done
-    
-    # Check if we timed out
-    if [ "$jenkins_ready" = "false" ]; then
-        log_warning "  Jenkins CLI setup skipped (timeout after ${max_attempts} attempts)"
-        log_info "  Foreman user or API token not created yet"
-        log_info "  Check Jenkins logs: ssh factory 'sudo docker logs jenkins'"
-        log_info "  Run ~/vms/factory/setup-jenkins-cli.sh later to complete setup"
-        return 0
+        while [ $attempt -lt $max_attempts ]; do
+            # Check if foreman user exists (Jenkins appends hash to username)
+            if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
+                "docker exec jenkins ls /var/jenkins_home/users/ 2>/dev/null | grep -q '^foreman_'" 2>/dev/null; then
+                # Check if token exists
+                if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost \
+                    "docker exec jenkins test -f /var/jenkins_home/foreman-api-token.txt 2>/dev/null" 2>/dev/null; then
+                    log_success "  ✓ Jenkins is ready (foreman user and token exist)"
+                    jenkins_ready=true
+                    break
+                fi
+            fi
+            
+            ((attempt++))
+            [ $((attempt % 10)) -eq 0 ] && log_info "    Still waiting... (${attempt}/${max_attempts})"
+            sleep 3
+        done
+        
+        # Check if we timed out
+        if [ "$jenkins_ready" = "false" ]; then
+            log_warning "  Jenkins CLI setup skipped (timeout after ${max_attempts} attempts)"
+            log_info "  Foreman user or API token not created yet"
+            log_info "  Check Jenkins logs: ssh factory 'sudo docker logs jenkins'"
+            log_info "  Run ~/vms/factory/setup-jenkins-cli.sh later to complete setup"
+        fi
     fi
-    
-    # Step 4: Install Caddy CA certificate (CRITICAL for HTTPS to Jenkins)
-    log_info "  Installing Caddy CA certificates for HTTPS access..."
     
     local root_cert_file="${VM_DIR}/caddy-root-ca.crt"
     local intermediate_cert_file="${VM_DIR}/caddy-intermediate-ca.crt"
@@ -3436,11 +3441,12 @@ setup_jenkins_cli() {
         fi
     fi
     
-    # Step 5: Download Jenkins CLI jar
-    log_info "  Downloading Jenkins CLI jar..."
-    
-    mkdir -p ~/.java/jars
-    local jar_downloaded=false
+    # Step 5-6: Download Jenkins CLI jar and setup (only if Jenkins is ready)
+    if [ "$jenkins_ready" = "true" ]; then
+        log_info "  Downloading Jenkins CLI jar..."
+        
+        mkdir -p ~/.java/jars
+        local jar_downloaded=false
     
     # Only try HTTPS if certificate is properly installed
     if [ "$cert_installed" = "true" ]; then
@@ -3715,6 +3721,10 @@ CLI_SCRIPT
     log_info ""
     log_info "  Verify with: source ~/.bashrc && jenkins-factory who-am-i"
     log_info "  Expected output: 'Authenticated as: foreman'"
+    else
+        log_info "  Jenkins CLI setup skipped (Jenkins not ready)"
+        log_info "  You can run it manually later: ~/vms/factory/setup-jenkins-cli.sh"
+    fi
 }
 
 ################################################################################
