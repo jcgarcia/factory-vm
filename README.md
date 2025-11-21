@@ -48,7 +48,7 @@ cd factory-vm
 
 Installation takes ~15-20 minutes and sets up everything automatically:
 - ✅ Alpine Linux ARM64
-- ✅ Jenkins with Java 21 (admin/admin123)
+- ✅ Jenkins with Java 21 (secure random password)
 - ✅ Docker, Kubernetes, Terraform, AWS CLI
 - ✅ SSL/HTTPS (no warnings after setup)
 - ✅ Jenkins CLI on host (jenkins-factory command)
