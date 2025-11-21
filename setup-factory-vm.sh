@@ -175,7 +175,7 @@ download_and_cache_awscli() {
     local cache_file="${CACHE_DIR}/awscli/awscli-latest-aarch64.zip"
     
     # Debug: Show what we're looking for
-    [ "$DEBUG" = "1" ] && echo "[DEBUG] Checking for AWS CLI cache at: $cache_file" >&2
+    [ "${DEBUG:-}" = "1" ] && echo "[DEBUG] Checking for AWS CLI cache at: $cache_file" >&2
     
     if [ -f "$cache_file" ]; then
         log_info "AWS CLI already cached"
