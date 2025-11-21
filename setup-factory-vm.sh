@@ -1306,9 +1306,9 @@ log_info "This speeds up installation by using multiple CPU cores..."
 {
     {
         # Try to use cached kubectl first, fallback to download
-        if [ -f /tmp/cache/kubectl/kubectl ]; then
+        if [ -f /var/cache/factory-build/kubectl/kubectl ]; then
             echo "Using cached kubectl \${KUBECTL_VERSION}..."
-            cp /tmp/cache/kubectl/kubectl /usr/local/bin/
+            cp /var/cache/factory-build/kubectl/kubectl /usr/local/bin/
             chmod +x /usr/local/bin/kubectl
         else
             echo "Downloading kubectl \${KUBECTL_VERSION}..."
@@ -1318,9 +1318,9 @@ log_info "This speeds up installation by using multiple CPU cores..."
         fi
         
         # Try to use cached Helm first, fallback to download
-        if [ -f /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz ]; then
+        if [ -f /var/cache/factory-build/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz ]; then
             echo "Using cached Helm \${HELM_VERSION}..."
-            tar -zxf /tmp/cache/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
+            tar -zxf /var/cache/factory-build/helm/helm-v\${HELM_VERSION}-linux-arm64.tar.gz
             mv linux-arm64/helm /usr/local/bin/
             rm -rf linux-arm64
         else
@@ -1345,9 +1345,9 @@ K8S_PID=\$!
 {
     {
         # Try to use cached Terraform first, fallback to download
-        if [ -f /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip ]; then
+        if [ -f /var/cache/factory-build/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip ]; then
             echo "Using cached Terraform \${TERRAFORM_VERSION}..."
-            unzip -q /tmp/cache/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip -d /tmp/
+            unzip -q /var/cache/factory-build/terraform/terraform_\${TERRAFORM_VERSION}_linux_arm64.zip -d /tmp/
             mv /tmp/terraform /usr/local/bin/
         else
             echo "Downloading Terraform \${TERRAFORM_VERSION}..."
@@ -1370,10 +1370,10 @@ TERRAFORM_PID=\$!
     {
         echo "Installing AWS CLI..."
         # Use cache if available (copied from host)
-        if [ -f "/tmp/cache/awscli/awscli-latest-aarch64.zip" ]; then
+        if [ -f "/var/cache/factory-build/awscli/awscli-latest-aarch64.zip" ]; then
             echo "Installing from cache..."
             cd /tmp
-            unzip -q /tmp/cache/awscli/awscli-latest-aarch64.zip
+            unzip -q /var/cache/factory-build/awscli/awscli-latest-aarch64.zip
             ./aws/install
             rm -rf /tmp/aws
         else
@@ -1487,7 +1487,7 @@ SKIPPED_COMPONENTS+=("Ansible")
 echo "  Note: To install Ansible later, run:" >> "\$INSTALL_LOG"
 echo "    pip3 install --break-system-packages ansible boto3 botocore" >> "\$INSTALL_LOG"
 echo "  Or use cached requirements:" >> "\$INSTALL_LOG"
-echo "    pip3 install --break-system-packages -r /tmp/cache/ansible/ansible-requirements.txt" >> "\$INSTALL_LOG"
+echo "    pip3 install --break-system-packages -r /var/cache/factory-build/ansible/ansible-requirements.txt" >> "\$INSTALL_LOG"
 
 ################################################################################
 # Component 7: Android SDK (Optional - skipped for speed)
@@ -2481,7 +2481,7 @@ EOF
     log_info "Creating cache directories in VM..."
     for i in 1 2 3; do
         if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /tmp/cache/{terraform,kubectl,helm,awscli,ansible} && sudo chown -R foreman:foreman /tmp/cache"; then
+            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build/{terraform,kubectl,helm,awscli,ansible} && sudo chown -R foreman:foreman /var/cache/factory-build"; then
             log_info "Cache directories created successfully"
             break
         else
@@ -2495,7 +2495,7 @@ EOF
         log_info "Copying Terraform from cache..."
         if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" \
-            foreman@localhost:/tmp/cache/terraform/; then
+            foreman@localhost:/var/cache/factory-build/terraform/; then
             log_info "✓ Terraform cached copy successful"
         else
             log_warning "Terraform cache copy failed (will download in VM)"
@@ -2507,7 +2507,7 @@ EOF
         log_info "Copying kubectl from cache..."
         if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" \
-            foreman@localhost:/tmp/cache/kubectl/kubectl; then
+            foreman@localhost:/var/cache/factory-build/kubectl/kubectl; then
             log_info "✓ kubectl cached copy successful"
         else
             log_warning "kubectl cache copy failed (will download in VM)"
@@ -2519,7 +2519,7 @@ EOF
         log_info "Copying Helm from cache..."
         if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
-            foreman@localhost:/tmp/cache/helm/; then
+            foreman@localhost:/var/cache/factory-build/helm/; then
             log_info "✓ Helm cached copy successful"
         else
             log_warning "Helm cache copy failed (will download in VM)"
@@ -2530,14 +2530,14 @@ EOF
     if [ -f "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" ]; then
         scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" \
-            foreman@localhost:/tmp/cache/awscli/ 2>/dev/null || log_warning "AWS CLI cache copy failed (will use apk)"
+            foreman@localhost:/var/cache/factory-build/awscli/ 2>/dev/null || log_warning "AWS CLI cache copy failed (will use apk)"
     fi
     
     # Copy Ansible requirements if cached
     if [ -f "${CACHE_DIR}/ansible/ansible-requirements.txt" ]; then
         scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/ansible/ansible-requirements.txt" \
-            foreman@localhost:/tmp/cache/ansible/ 2>/dev/null || true
+            foreman@localhost:/var/cache/factory-build/ansible/ 2>/dev/null || true
     fi
     
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
