@@ -2412,6 +2412,9 @@ SSH_CONFIG
 # Restart SSH to apply changes
 rc-service sshd restart
 
+# Wait for SSH to fully restart before allowing external connections
+sleep 5
+
 echo "✓ Foreman user created"
 echo "✓ SSH hardened (keys only, no password authentication)"
 EOF
