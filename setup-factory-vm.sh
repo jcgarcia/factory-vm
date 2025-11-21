@@ -2481,7 +2481,7 @@ EOF
     log_info "Creating cache directories in VM..."
     for i in 1 2 3; do
         if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build/{terraform,kubectl,helm,awscli,ansible} && sudo chown -R foreman:foreman /var/cache/factory-build"; then
+            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build/terraform /var/cache/factory-build/kubectl /var/cache/factory-build/helm /var/cache/factory-build/awscli /var/cache/factory-build/ansible && sudo chown -R foreman:foreman /var/cache/factory-build"; then
             log_info "Cache directories created successfully"
             break
         else
