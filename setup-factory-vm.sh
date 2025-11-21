@@ -95,7 +95,7 @@ SSH_KEY_NAME="factory-foreman"
 
 # Disk configuration
 SYSTEM_DISK_SIZE="50G"  # Increased for Docker images
-DATA_DISK_SIZE="200G"   # Increased for build artifacts
+DATA_DISK_SIZE="50G"   # Conservative default, expandable later
 SYSTEM_DISK="${VM_DIR}/${VM_NAME}.qcow2"
 DATA_DISK="${VM_DIR}/${VM_NAME}-data.qcow2"
 
@@ -262,53 +262,6 @@ EOF
     return 0
 }
 
-download_and_cache_jenkins_image() {
-    local cache_file="${CACHE_DIR}/jenkins/jenkins-${JENKINS_VERSION}.tar"
-    
-    if [ -f "$cache_file" ]; then
-        log_info "Jenkins Docker image already cached"
-        return 0
-    fi
-    
-    # Check if Docker is available and accessible
-    if ! command -v docker >/dev/null 2>&1; then
-        log_info "Docker not installed - skipping Jenkins image caching"
-        log_info "  (Image will be pulled directly in VM)"
-        return 0
-    fi
-    
-    if ! docker info >/dev/null 2>&1; then
-        log_info "Docker not accessible (permission denied or not running)"
-        log_info "  Skipping Jenkins image caching - image will be pulled in VM"
-        return 0
-    fi
-    
-    log_info "Downloading Jenkins Docker image (jenkins/jenkins:${JENKINS_VERSION})..."
-    log_info "  This is a 1.5+ GB download and will take several minutes"
-    log_info "  But it only needs to be downloaded once!"
-    
-    mkdir -p "${CACHE_DIR}/jenkins"
-    
-    # Pull the image if not already present locally
-    if ! docker image inspect jenkins/jenkins:${JENKINS_VERSION} >/dev/null 2>&1; then
-        if ! docker pull jenkins/jenkins:${JENKINS_VERSION}; then
-            log_warning "Failed to pull Jenkins Docker image - will pull in VM"
-            return 0
-        fi
-    fi
-    
-    # Save to cache
-    log_info "Saving Jenkins image to cache (this may take a few minutes)..."
-    if docker save jenkins/jenkins:${JENKINS_VERSION} -o "$cache_file"; then
-        log_success "Jenkins Docker image cached ($(du -h "$cache_file" | cut -f1))"
-        return 0
-    else
-        log_warning "Failed to save Jenkins image to cache - will pull in VM"
-        rm -f "$cache_file"
-        return 0
-    fi
-}
-
 cache_all_tools() {
     log "Downloading and caching installation files..."
     log_info "First-time downloads will be cached for faster subsequent installations"
@@ -323,7 +276,6 @@ cache_all_tools() {
     log_info "  Terraform: ${TERRAFORM_VERSION}"
     log_info "  kubectl: ${KUBECTL_VERSION}"
     log_info "  Helm: ${HELM_VERSION}"
-    log_info "  Jenkins: ${JENKINS_VERSION}"
     echo ""
     
     # Download in parallel (background jobs)
@@ -337,8 +289,6 @@ cache_all_tools() {
     local awscli_pid=$!
     download_and_cache_ansible &
     local ansible_pid=$!
-    download_and_cache_jenkins_image &
-    local jenkins_pid=$!
     
     # Wait for parallel downloads
     wait $terraform_pid
@@ -346,7 +296,6 @@ cache_all_tools() {
     wait $helm_pid
     wait $awscli_pid
     wait $ansible_pid
-    wait $jenkins_pid
     
     log_success "All tools cached and ready for installation"
     echo ""
@@ -739,7 +688,7 @@ offer_configuration_choice() {
     
     if [ "$can_optimal" = true ]; then
         log "${GREEN}[$profile_count] OPTIMAL${NC} - Maximum performance (recommended for your system)"
-        log "    Memory: 8 GB  |  CPUs: 6 cores  |  System: 50 GB  |  Data: 200 GB"
+        log "    Memory: 8 GB  |  CPUs: 6 cores  |  System: 50 GB  |  Data: 50 GB"
         log "    Best for: Frequent builds, multiple concurrent jobs, large projects"
         log ""
         profiles+=("optimal")
@@ -748,7 +697,7 @@ offer_configuration_choice() {
     
     if [ "$can_recommended" = true ]; then
         log "${GREEN}[$profile_count] RECOMMENDED${NC} - Balanced performance (default)"
-        log "    Memory: 4 GB  |  CPUs: 4 cores  |  System: 50 GB  |  Data: 200 GB"
+        log "    Memory: 4 GB  |  CPUs: 4 cores  |  System: 50 GB  |  Data: 50 GB"
         log "    Best for: Regular builds, standard development workflow"
         log ""
         profiles+=("recommended")
@@ -757,7 +706,7 @@ offer_configuration_choice() {
     
     if [ "$can_minimum" = true ]; then
         log "${YELLOW}[$profile_count] MINIMUM${NC} - Resource-constrained (slower builds)"
-        log "    Memory: 2 GB  |  CPUs: 2 cores  |  System: 50 GB  |  Data: 100 GB"
+        log "    Memory: 2 GB  |  CPUs: 2 cores  |  System: 50 GB  |  Data: 50 GB"
         log "    Best for: Occasional builds, limited host resources"
         log ""
         profiles+=("minimum")
@@ -801,28 +750,28 @@ offer_configuration_choice() {
             # Use minimum settings even if below minimum
             VM_MEMORY="2G"
             VM_CPUS="2"
-            DATA_DISK_SIZE="100G"
+            DATA_DISK_SIZE="50G"
             log_info "Selected: MINIMUM configuration (below recommended)"
         elif [ "$can_optimal" = true ]; then
             # Best resources available - use OPTIMAL
             # Directly set values instead of relying on array index
             VM_MEMORY="8G"
             VM_CPUS="6"
-            DATA_DISK_SIZE="200G"
+            DATA_DISK_SIZE="50G"
             log_info "Auto-mode: Using OPTIMAL profile (best performance)"
         elif [ "$can_recommended" = true ]; then
             # Good resources - use RECOMMENDED
             # Directly set values instead of relying on array index
             VM_MEMORY="4G"
             VM_CPUS="4"
-            DATA_DISK_SIZE="200G"
+            DATA_DISK_SIZE="50G"
             log_info "Auto-mode: Using RECOMMENDED profile (balanced)"
         else
             # Limited resources - use MINIMUM
             # Directly set values instead of relying on array index
             VM_MEMORY="2G"
             VM_CPUS="2"
-            DATA_DISK_SIZE="100G"
+            DATA_DISK_SIZE="50G"
             log_info "Auto-mode: Using MINIMUM profile (resource-constrained)"
         fi
     fi
@@ -926,12 +875,13 @@ configure_custom_resources() {
     
     local data_disk_gb
     while true; do
-        read -p "Data disk size in GB [30-$max_data_disk, recommended 100]: " data_disk_gb
+        read -p "Data disk size in GB [30-$max_data_disk, recommended 50]: " data_disk_gb
         if [[ "$data_disk_gb" =~ ^[0-9]+$ ]] && [ "$data_disk_gb" -ge 30 ] && [ "$data_disk_gb" -le "$max_data_disk" ]; then
             DATA_DISK_SIZE="${data_disk_gb}G"
             if [ "$data_disk_gb" -lt 50 ]; then
                 log_warning "Small data disk. You'll need to clean Docker images frequently."
             fi
+            log_info "Tip: You can expand the data disk later using expand-data-disk.sh"
             break
         else
             echo "Invalid. Enter a number between 30 and $max_data_disk."
@@ -2618,19 +2568,6 @@ EOF
         scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "${CACHE_DIR}/ansible/ansible-requirements.txt" \
             foreman@localhost:/var/cache/factory-build/ansible/ 2>/dev/null || true
-    fi
-    
-    # Copy Jenkins Docker image if cached
-    if [ -f "${CACHE_DIR}/jenkins/jenkins-${JENKINS_VERSION}.tar" ]; then
-        log_info "Copying Jenkins Docker image from cache..."
-        log_info "  This is a large file (1.5+ GB) and will take a few minutes to transfer..."
-        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/jenkins/jenkins-${JENKINS_VERSION}.tar" \
-            foreman@localhost:/var/cache/factory-build/jenkins-image.tar; then
-            log_info "✓ Jenkins image cached copy successful"
-        else
-            log_warning "Jenkins image cache copy failed (will pull in VM)"
-        fi
     fi
     
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
