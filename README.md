@@ -2,7 +2,7 @@
 
 **Production-ready ARM64 virtual machine with Jenkins, Docker, Kubernetes, and complete DevOps toolchain.**
 
-![Factory](TheFactory.png)
+![Factory](docs/TheFactory.png)
 
 ## 🚀 Quick Start
 
@@ -122,21 +122,21 @@ ssh factory
 
 Comprehensive guides are available:
 
-- **[JENKINS-CONFIGURATION.md](./JENKINS-CONFIGURATION.md)** - Complete Jenkins setup guide
+- **[JENKINS-CONFIGURATION.md](./docs/JENKINS-CONFIGURATION.md)** - Complete Jenkins setup guide
   - Architecture overview
   - Plugin details
   - Best practices
   - Troubleshooting
   
-- **[JENKINS-CLI.md](./JENKINS-CLI.md)** - Jenkins CLI usage guide
+- **[JENKINS-CLI.md](./docs/JENKINS-CLI.md)** - Jenkins CLI usage guide
   - Command reference
   - Examples and patterns
   - Automation recipes
   - Security best practices
   
-- **[CHANGELOG.md](./CHANGELOG.md)** - Version history and changes
+- **[CHANGELOG.md](./docs/CHANGELOG.md)** - Version history and changes
 
-- **[JENKINS-CLI-IMPLEMENTATION.md](./JENKINS-CLI-IMPLEMENTATION.md)** - Technical implementation details
+- **[JENKINS-CLI-IMPLEMENTATION.md](./docs/JENKINS-CLI-IMPLEMENTATION.md)** - Technical implementation details
 
 ## 🔧 VM Management
 
@@ -213,7 +213,7 @@ jenkins-factory groovy = < my-script.groovy
 
 ### Advanced Usage
 
-See [JENKINS-CLI.md](./JENKINS-CLI.md) for:
+See [JENKINS-CLI.md](./docs/JENKINS-CLI.md) for:
 - Complete command reference
 - Pipeline job creation
 - Credential management
@@ -571,8 +571,8 @@ Contributions welcome! Please:
 For issues or questions:
 - Check documentation in this directory
 - Review logs: `ssh factory 'docker logs jenkins'`
-- Consult [JENKINS-CLI.md](./JENKINS-CLI.md) for CLI issues
-- See [JENKINS-CONFIGURATION.md](./JENKINS-CONFIGURATION.md) for setup questions
+- Consult [JENKINS-CLI.md](./docs/JENKINS-CLI.md) for CLI issues
+- See [JENKINS-CONFIGURATION.md](./docs/JENKINS-CONFIGURATION.md) for setup questions
 
 ---
 

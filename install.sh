@@ -36,7 +36,7 @@ fi
 echo "→ Downloading latest scripts..."
 
 # Download setup script
-if ! curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh?nocache=$(date +%s)" -o setup-factory-vm.sh.tmp; then
+if ! curl -fsSL "$RAW_URL/$BRANCH/tools/setup-factory-vm.sh?nocache=$(date +%s)" -o setup-factory-vm.sh.tmp; then
     echo "ERROR: Failed to download setup script"
     exit 1
 fi
@@ -45,7 +45,7 @@ chmod +x setup-factory-vm.sh
 sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
 
 # Download alpine-install.exp
-if ! curl -fsSL "$RAW_URL/$BRANCH/alpine-install.exp?nocache=$(date +%s)" -o alpine-install.exp.tmp; then
+if ! curl -fsSL "$RAW_URL/$BRANCH/tools/alpine-install.exp?nocache=$(date +%s)" -o alpine-install.exp.tmp; then
     echo "ERROR: Failed to download alpine-install.exp"
     exit 1
 fi

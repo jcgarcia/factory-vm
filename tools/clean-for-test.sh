@@ -101,7 +101,7 @@ if [ -f "$DATA_DISK" ]; then
     log_success "Data disk backed up to: $DATA_DISK_BACKUP"
     
     # Show size
-    local size=$(du -h "$DATA_DISK_BACKUP" | cut -f1)
+    size=$(du -h "$DATA_DISK_BACKUP" | cut -f1)
     log_info "Data disk size: $size (contains cached tools and Docker images)"
 fi
 
