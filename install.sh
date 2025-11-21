@@ -32,20 +32,27 @@ if [ -d "cache" ]; then
     CACHE_PRESERVED=1
 fi
 
-# Download latest setup script (always get fresh version)
-echo "→ Downloading latest setup script..."
-if curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh?nocache=$(date +%s)" -o setup-factory-vm.sh.tmp; then
-    mv setup-factory-vm.sh.tmp setup-factory-vm.sh
-    chmod +x setup-factory-vm.sh
-    
-    # Fix line endings
-    sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
-    
-    echo "✓ Setup script downloaded"
-else
+# Download latest scripts (always get fresh version)
+echo "→ Downloading latest scripts..."
+
+# Download setup script
+if ! curl -fsSL "$RAW_URL/$BRANCH/setup-factory-vm.sh?nocache=$(date +%s)" -o setup-factory-vm.sh.tmp; then
     echo "ERROR: Failed to download setup script"
     exit 1
 fi
+mv setup-factory-vm.sh.tmp setup-factory-vm.sh
+chmod +x setup-factory-vm.sh
+sed -i 's/\r$//' setup-factory-vm.sh 2>/dev/null || dos2unix setup-factory-vm.sh 2>/dev/null || true
+
+# Download alpine-install.exp
+if ! curl -fsSL "$RAW_URL/$BRANCH/alpine-install.exp?nocache=$(date +%s)" -o alpine-install.exp.tmp; then
+    echo "ERROR: Failed to download alpine-install.exp"
+    exit 1
+fi
+mv alpine-install.exp.tmp alpine-install.exp
+sed -i 's/\r$//' alpine-install.exp 2>/dev/null || dos2unix alpine-install.exp 2>/dev/null || true
+
+echo "✓ Scripts downloaded"
 
 # Notify about cache preservation
 if [ $CACHE_PRESERVED -eq 1 ]; then
