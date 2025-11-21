@@ -2513,25 +2513,29 @@ EOF
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
     # This is more reliable than copying .hpi files and allows using cached plugins from host
     
+    # Copy vm-setup.sh and inject the password variable at the top
     scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        "${VM_DIR}/vm-setup.sh" foreman@localhost:/tmp/ && \
+        "${VM_DIR}/vm-setup.sh" foreman@localhost:/tmp/vm-setup-orig.sh && \
     ssh -i "$VM_SSH_PRIVATE_KEY" -p "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        foreman@localhost "sudo chown root:root /tmp/vm-setup.sh"
+        foreman@localhost "echo '#!/bin/bash' > /tmp/vm-setup.sh && \
+                           echo 'export JENKINS_FOREMAN_PASSWORD=\"${JENKINS_FOREMAN_PASSWORD}\"' >> /tmp/vm-setup.sh && \
+                           tail -n +2 /tmp/vm-setup-orig.sh >> /tmp/vm-setup.sh && \
+                           rm /tmp/vm-setup-orig.sh && \
+                           sudo chown root:root /tmp/vm-setup.sh && \
+                           sudo chmod +x /tmp/vm-setup.sh"
     
     # Run setup script WITHOUT outer timeout - script handles its own timeouts per component
     # This allows slow downloads (Android SDK, etc.) to complete without aborting entire install
-    # Pass Jenkins foreman password as environment variable (secure - not visible in process list)
+    # Password is already embedded in the script
     # Use -tt to force pseudo-terminal allocation for real-time output (no buffering)
-    # Export variable before SSH so it's available to the remote script via sudo
-    export JENKINS_FOREMAN_PASSWORD
     if ssh -tt -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=60 -o ServerAliveInterval=30 -p "$VM_SSH_PORT" foreman@localhost \
-        "export JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}' && sudo -E bash /tmp/vm-setup.sh" ; then
+        "sudo /tmp/vm-setup.sh && sudo rm -f /tmp/vm-setup.sh" ; then
         log "  ✓ Build tools installed successfully"
     else
         log_warning "Tool installation had some errors, but VM may still be usable"
         log_info "Check installation log: ssh factory 'cat /root/factory-install.log'"
-        log_info "You can retry failed components: ssh factory 'export JENKINS_FOREMAN_PASSWORD=<password> && sudo -E bash /tmp/vm-setup.sh'"
+        log_info "You can retry failed components: ssh factory 'sudo /tmp/vm-setup.sh'"
     fi
     
     # Setup Jenkins CLI while VM is still running
