@@ -3168,17 +3168,35 @@ configure_host_ssh() {
     log "Configuring SSH on host..."
     
     local ssh_config="${HOME}/.ssh/config"
+    local temp_config="${ssh_config}.tmp"
     
-    # Remove ALL old factory entries (handles duplicates and comments)
-    if grep -q "^Host factory$" "$ssh_config" 2>/dev/null; then
-        log_info "  Removing old SSH config entry..."
-        # Remove from first comment or Host factory to next Host or end of file
-        sed -i '/^# .*Factory.*Build Environment$/,/^Host factory$/d; /^Host factory$/,/^Host /{ /^Host factory$/,/^Host /{ /^Host /!d; }; }; /^Host factory$/,${/^Host factory/!{/^Host /!d; }; }' "$ssh_config"
-        # Clean up any leftover factory blocks
-        sed -i '/^Host factory$/,/^$/d' "$ssh_config"
-        # Remove duplicate blank lines
-        sed -i '/^$/N;/^\n$/d' "$ssh_config"
+    # Create .ssh directory if it doesn't exist
+    mkdir -p "${HOME}/.ssh"
+    chmod 700 "${HOME}/.ssh"
+    
+    # Remove ALL old factory entries using a simple approach
+    if [ -f "$ssh_config" ]; then
+        log_info "  Removing old SSH config entries..."
+        
+        # Use awk to filter out factory entries (more reliable than sed)
+        awk '
+            /^# Alpine ARM64 VM - Factory Build Environment$/ { skip=1; next }
+            /^# .*Factory.*/ { skip=1; next }
+            /^Host factory$/ { skip=1; next }
+            skip==1 && /^Host / { skip=0 }
+            skip==1 && /^[[:space:]]/ { next }
+            skip==1 && /^$/ { next }
+            skip==0 { print }
+        ' "$ssh_config" > "$temp_config"
+        
+        # Replace original with cleaned version
+        mv "$temp_config" "$ssh_config"
+    else
+        # Create empty config if it doesn't exist
+        touch "$ssh_config"
     fi
+    
+    chmod 600 "$ssh_config"
     
     # Add new entry
     cat >> "$ssh_config" << EOF
