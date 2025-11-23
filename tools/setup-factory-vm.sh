@@ -1480,53 +1480,36 @@ AWSCLI_PID=\$!
 # Component 6: jcscripts (background)
 {
     {
-        echo "Setting up jcscripts directory..."
-        mkdir -p /home/foreman/.scripts
-        cd /home/foreman/.scripts
+        echo "Installing jcscripts collection..."
         
-        # Create minimal awslogin script
-        echo "Creating SSH-compatible awslogin script..."
-        cat > awslogin << 'AWSLOGIN_EOF'
-#!/bin/bash
-# AWS SSO Login Helper - SSH Compatible
-
-set -e
-PROFILE="\${1:-default}"
-
-if [ -n "\$SSH_CONNECTION" ] || [ -n "\$SSH_CLIENT" ]; then
-    echo "AWS SSO Login - SSH Mode"
-    echo "Browser cannot be launched automatically."
-    echo "Copy the URL below and open it on your local machine."
-    aws sso login --profile "\$PROFILE" --no-browser
-else
-    aws sso login --profile "\$PROFILE"
-fi
-echo "✓ AWS SSO login successful for profile: \$PROFILE"
-AWSLOGIN_EOF
-        chmod +x awslogin
+        # Install jcscripts using the official one-liner as foreman user
+        su - foreman -c 'curl -s https://raw.githubusercontent.com/jcgarcia/jcscripts/main/installscripts | bash' || {
+            echo "ERROR: jcscripts installation failed"
+            exit 1
+        }
         
-        # Add to PATH for foreman user - Alpine Linux requires .profile for login shells
-        # Add to .profile (for login shells - ash/sh)
-        if ! grep -q ".scripts" /home/foreman/.profile 2>/dev/null; then
+        # Add .ashrc for Alpine's ash shell (non-login interactive shells)
+        if [ ! -f /home/foreman/.ashrc ]; then
+            echo 'export PATH="\$HOME/.scripts:\$PATH"' > /home/foreman/.ashrc
+            chown foreman:foreman /home/foreman/.ashrc
+        fi
+        
+        # Add ENV variable to .profile to source .ashrc for all shells
+        if ! grep -q "ENV=" /home/foreman/.profile 2>/dev/null; then
             echo "" >> /home/foreman/.profile
-            echo "# Add jcscripts to PATH" >> /home/foreman/.profile
-            echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.profile
+            echo "# Source .ashrc for all shells (Alpine Linux compatibility)" >> /home/foreman/.profile
+            echo 'export ENV=\$HOME/.ashrc' >> /home/foreman/.profile
         fi
         
-        # Also add to .bashrc (for interactive bash shells)
-        if [ -f /home/foreman/.bashrc ]; then
-            if ! grep -q ".scripts" /home/foreman/.bashrc; then
-                echo "" >> /home/foreman/.bashrc
-                echo "# Add jcscripts to PATH" >> /home/foreman/.bashrc
-                echo 'export PATH="\$HOME/.scripts:\$PATH"' >> /home/foreman/.bashrc
-            fi
-        fi
-        
+        # Ensure .profile is owned by foreman (critical fix)
+        chown foreman:foreman /home/foreman/.profile
         chown -R foreman:foreman /home/foreman/.scripts
         
         # Configure AWS directory
         mkdir -p /home/foreman/.aws
         chown -R foreman:foreman /home/foreman/.aws
+        
+        echo "✓ jcscripts collection installed (50+ scripts including gitproject)"
     } >> "\$INSTALL_LOG" 2>&1 && {
         echo "JCSCRIPTS_OK" > /tmp/jcscripts.status
     } || {
