@@ -2344,6 +2344,37 @@ start_vm_for_install() {
 }
 
 ################################################################################
+# Setup Data Disk in VM
+################################################################################
+
+setup_data_disk_in_vm() {
+    log "Setting up data disk for persistent cache..."
+    
+    # Check if data disk has a filesystem
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "sudo blkid /dev/vdb" 2>/dev/null | grep -q "TYPE=\"ext4\""; then
+        
+        log_info "Data disk not formatted - creating ext4 filesystem..."
+        ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$VM_SSH_PORT" foreman@localhost "sudo mkfs.ext4 -F /dev/vdb -L factory-cache" >/dev/null 2>&1
+        
+        log_success "Data disk formatted (ext4)"
+    else
+        log_info "Data disk already formatted (reusing preserved cache)"
+    fi
+    
+    # Create mount point and mount data disk
+    ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build && sudo mount /dev/vdb /var/cache/factory-build && sudo chown -R foreman:foreman /var/cache/factory-build"
+    
+    # Add to fstab for auto-mount on boot
+    ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "echo '/dev/vdb /var/cache/factory-build ext4 defaults 0 2' | sudo tee -a /etc/fstab" >/dev/null
+    
+    log_success "Data disk mounted at /var/cache/factory-build"
+}
+
+################################################################################
 # Configure Installed VM
 ################################################################################
 
@@ -2530,82 +2561,108 @@ EOF
     log_info "Installation will continue even if some optional components fail"
     log ""
     
-    # Copy cached tool files to VM first
-    log_info "Copying cached installation files to VM..."
+    # Setup data disk for persistent cache
+    setup_data_disk_in_vm
     
-    # Create cache directory structure in VM - retry if SSH not ready
-    log_info "Creating cache directories in VM..."
-    for i in 1 2 3; do
-        if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build/terraform /var/cache/factory-build/kubectl /var/cache/factory-build/helm /var/cache/factory-build/awscli /var/cache/factory-build/ansible /var/cache/factory-build/jenkins && sudo chown -R foreman:foreman /var/cache/factory-build"; then
-            log_info "Cache directories created successfully"
-            break
-        else
-            log_info "Attempt $i failed, retrying..."
-            [ $i -lt 3 ] && sleep 3
+    # Copy cached tool files to VM (only if not already cached on data disk)
+    log_info "Preparing cached installation files..."
+    
+    # Create cache subdirectories
+    ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "mkdir -p /var/cache/factory-build/terraform /var/cache/factory-build/kubectl /var/cache/factory-build/helm /var/cache/factory-build/awscli /var/cache/factory-build/ansible /var/cache/factory-build/jenkins"
+    
+    # Copy terraform (only if not already on data disk)
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" 2>/dev/null; then
+        
+        if [ -f "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" ]; then
+            log_info "Copying Terraform from host cache..."
+            if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" \
+                foreman@localhost:/var/cache/factory-build/terraform/; then
+                log_info "✓ Terraform cached"
+            else
+                log_warning "Terraform cache copy failed (will download in VM)"
+            fi
         fi
-    done
+    else
+        log_info "✓ Terraform already cached on data disk (skipping copy)"
+    fi
     
-    # Copy terraform
-    if [ -f "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" ]; then
-        log_info "Copying Terraform from cache..."
-        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/terraform/terraform_${TERRAFORM_VERSION}_linux_arm64.zip" \
-            foreman@localhost:/var/cache/factory-build/terraform/; then
-            log_info "✓ Terraform cached copy successful"
-        else
-            log_warning "Terraform cache copy failed (will download in VM)"
+    # Copy kubectl (only if not already on data disk)
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/kubectl/kubectl" 2>/dev/null; then
+        
+        if [ -f "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" ]; then
+            log_info "Copying kubectl from host cache..."
+            if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" \
+                foreman@localhost:/var/cache/factory-build/kubectl/kubectl; then
+                log_info "✓ kubectl cached"
+            else
+                log_warning "kubectl cache copy failed (will download in VM)"
+            fi
+        fi
+    else
+        log_info "✓ kubectl already cached on data disk (skipping copy)"
+    fi
+    
+    # Copy helm (only if not already on data disk)
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" 2>/dev/null; then
+        
+        if [ -f "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" ]; then
+            log_info "Copying Helm from host cache..."
+            if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
+                foreman@localhost:/var/cache/factory-build/helm/; then
+                log_info "✓ Helm cached"
+            else
+                log_warning "Helm cache copy failed (will download in VM)"
+            fi
+        fi
+    else
+        log_info "✓ Helm already cached on data disk (skipping copy)"
+    fi
+    
+    # Copy AWS CLI if cached (only if not already on data disk)
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/awscli/awscli-latest-aarch64.zip" 2>/dev/null; then
+        
+        if [ -f "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" ]; then
+            scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" \
+                foreman@localhost:/var/cache/factory-build/awscli/ 2>/dev/null || log_warning "AWS CLI cache copy failed (will use apk)"
         fi
     fi
     
-    # Copy kubectl
-    if [ -f "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" ]; then
-        log_info "Copying kubectl from cache..."
-        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/kubectl/kubectl_${KUBECTL_VERSION}" \
-            foreman@localhost:/var/cache/factory-build/kubectl/kubectl; then
-            log_info "✓ kubectl cached copy successful"
-        else
-            log_warning "kubectl cache copy failed (will download in VM)"
+    # Copy Ansible requirements if cached (only if not already on data disk)
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/ansible/ansible-requirements.txt" 2>/dev/null; then
+        
+        if [ -f "${CACHE_DIR}/ansible/ansible-requirements.txt" ]; then
+            scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                "${CACHE_DIR}/ansible/ansible-requirements.txt" \
+                foreman@localhost:/var/cache/factory-build/ansible/ 2>/dev/null || true
         fi
     fi
     
-    # Copy helm
-    if [ -f "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" ]; then
-        log_info "Copying Helm from cache..."
-        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/helm/helm-v${HELM_VERSION}-linux-arm64.tar.gz" \
-            foreman@localhost:/var/cache/factory-build/helm/; then
-            log_info "✓ Helm cached copy successful"
-        else
-            log_warning "Helm cache copy failed (will download in VM)"
+    # Copy Jenkins Docker image if cached (only if not already on data disk - largest file 475MB)
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar" 2>/dev/null; then
+        
+        if [ -f "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" ]; then
+            log_info "Copying Jenkins Docker image from host cache (475MB - takes ~1 minute)..."
+            if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" \
+                foreman@localhost:/var/cache/factory-build/jenkins/ 2>/dev/null; then
+                log_info "✓ Jenkins image cached (fast install ahead!)"
+            else
+                log_warning "Jenkins image cache copy failed (will download in VM, ~10 minutes)"
+            fi
         fi
-    fi
-    
-    # Copy AWS CLI if cached
-    if [ -f "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" ]; then
-        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/awscli/awscli-latest-aarch64.zip" \
-            foreman@localhost:/var/cache/factory-build/awscli/ 2>/dev/null || log_warning "AWS CLI cache copy failed (will use apk)"
-    fi
-    
-    # Copy Ansible requirements if cached
-    if [ -f "${CACHE_DIR}/ansible/ansible-requirements.txt" ]; then
-        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/ansible/ansible-requirements.txt" \
-            foreman@localhost:/var/cache/factory-build/ansible/ 2>/dev/null || true
-    fi
-    
-    # Copy Jenkins Docker image if cached
-    if [ -f "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" ]; then
-        log_info "Copying Jenkins Docker image from cache (this saves 8-10 minutes)..."
-        if scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" \
-            foreman@localhost:/var/cache/factory-build/jenkins/ 2>/dev/null; then
-            log_info "✓ Jenkins image cached copy successful (fast install ahead!)"
-        else
-            log_warning "Jenkins image cache copy failed (will download in VM, ~10 minutes)"
-        fi
+    else
+        log_info "✓ Jenkins image already cached on data disk (skipping 475MB copy - saves ~1 minute!)"
     fi
     
     # Note: Jenkins plugins will be installed from HOST using jenkins-cli AFTER Jenkins is ready
