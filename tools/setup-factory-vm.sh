@@ -2356,7 +2356,7 @@ setup_data_disk_in_vm() {
         
         log_info "Data disk not formatted - creating ext4 filesystem..."
         ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p "$VM_SSH_PORT" foreman@localhost "sudo mkfs.ext4 -F /dev/vdb -L factory-cache" >/dev/null 2>&1
+            -p "$VM_SSH_PORT" foreman@localhost "sudo mkfs.ext4 -F -L factory-cache /dev/vdb" >/dev/null 2>&1
         
         log_success "Data disk formatted (ext4)"
     else
