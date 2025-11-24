@@ -829,19 +829,19 @@ offer_configuration_choice() {
             optimal)
                 VM_MEMORY="8G"
                 VM_CPUS="6"
-                DATA_DISK_SIZE="200G"
+                DATA_DISK_SIZE="50G"
                 log_info "Selected: OPTIMAL configuration"
                 ;;
             recommended)
                 VM_MEMORY="4G"
                 VM_CPUS="4"
-                DATA_DISK_SIZE="200G"
+                DATA_DISK_SIZE="50G"
                 log_info "Selected: RECOMMENDED configuration"
                 ;;
             minimum)
                 VM_MEMORY="2G"
                 VM_CPUS="2"
-                DATA_DISK_SIZE="100G"
+                DATA_DISK_SIZE="50G"
                 log_info "Selected: MINIMUM configuration"
                 ;;
             custom)
