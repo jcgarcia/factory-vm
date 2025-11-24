@@ -1457,17 +1457,10 @@ TERRAFORM_PID=\$!
 {
     {
         echo "Installing AWS CLI..."
-        # Use cache if available (copied from host)
-        if [ -f "/var/cache/factory-build/awscli/awscli-latest-aarch64.zip" ]; then
-            echo "Installing from cache..."
-            cd /tmp
-            unzip -q /var/cache/factory-build/awscli/awscli-latest-aarch64.zip
-            ./aws/install
-            rm -rf /tmp/aws
-        else
-            echo "Installing from Alpine packages (no cache found)..."
-            apk add aws-cli
-        fi
+        # Alpine Linux uses musl libc, official AWS CLI is built for glibc
+        # Use Alpine's native package which is compiled for musl
+        echo "Installing from Alpine repositories (musl-compatible)..."
+        apk add --no-cache aws-cli
         aws --version
     } >> "\$INSTALL_LOG" 2>&1 && {
         echo "AWSCLI_OK" > /tmp/awscli.status
