@@ -1382,12 +1382,13 @@ CADDY_CONFIG
 }
 
 ################################################################################
-# Component 3-6: Parallel Installation of Independent Tools
+# Component 3-5: Parallel Installation of Independent Tools
 # These tools don't depend on each other, so we can install them in parallel
 # to speed up the installation process
+# Note: jcscripts is installed AFTER this to avoid APK lock conflicts
 ################################################################################
 
-log_info "Installing tools in parallel (Kubernetes, Terraform, AWS CLI, jcscripts)..."
+log_info "Installing tools in parallel (Kubernetes, Terraform, AWS CLI)..."
 log_info "This speeds up installation by using multiple CPU cores..."
 
 # Component 3: Kubernetes Tools (background)
@@ -1470,54 +1471,47 @@ TERRAFORM_PID=\$!
 } &
 AWSCLI_PID=\$!
 
-# Component 6: jcscripts (background)
-{
-    {
-        echo "Installing jcscripts collection..."
-        
-        # Install jcscripts using the official one-liner as foreman user
-        # Answer 'y' to continue without AWS CLI (AWS CLI will be installed later or is optional)
-        su - foreman -c 'echo "y" | curl -s https://raw.githubusercontent.com/jcgarcia/jcscripts/main/installscripts | bash' || {
-            echo "ERROR: jcscripts installation failed"
-            exit 1
-        }
-        
-        # Add .ashrc for Alpine's ash shell (non-login interactive shells)
-        if [ ! -f /home/foreman/.ashrc ]; then
-            echo 'export PATH="\$HOME/.scripts:\$PATH"' > /home/foreman/.ashrc
-            chown foreman:foreman /home/foreman/.ashrc
-        fi
-        
-        # Add ENV variable to .profile to source .ashrc for all shells
-        if ! grep -q "ENV=" /home/foreman/.profile 2>/dev/null; then
-            echo "" >> /home/foreman/.profile
-            echo "# Source .ashrc for all shells (Alpine Linux compatibility)" >> /home/foreman/.profile
-            echo 'export ENV=\$HOME/.ashrc' >> /home/foreman/.profile
-        fi
-        
-        # Ensure .profile is owned by foreman (critical fix)
-        chown foreman:foreman /home/foreman/.profile
-        chown -R foreman:foreman /home/foreman/.scripts
-        
-        # Configure AWS directory
-        mkdir -p /home/foreman/.aws
-        chown -R foreman:foreman /home/foreman/.aws
-        
-        echo "✓ jcscripts collection installed (50+ scripts including gitproject)"
-    } >> "\$INSTALL_LOG" 2>&1 && {
-        echo "JCSCRIPTS_OK" > /tmp/jcscripts.status
-    } || {
-        echo "JCSCRIPTS_FAILED" > /tmp/jcscripts.status
-    }
-} &
-JCSCRIPTS_PID=\$!
-
 # Wait for all parallel installations to complete
 log_info "Waiting for parallel installations to complete..."
 wait \$K8S_PID
 wait \$TERRAFORM_PID
 wait \$AWSCLI_PID
-wait \$JCSCRIPTS_PID
+
+# Install jcscripts AFTER AWS CLI (not in parallel to avoid conflicts)
+log_info "Installing jcscripts collection..."
+{
+    # Install jcscripts using the official one-liner as foreman user
+    # AWS CLI is now installed, so this should work without prompts
+    su - foreman -c 'curl -s https://raw.githubusercontent.com/jcgarcia/jcscripts/main/installscripts | bash' || {
+        echo "ERROR: jcscripts installation failed"
+        echo "JCSCRIPTS_FAILED" > /tmp/jcscripts.status
+        exit 1
+    }
+    
+    # Add .ashrc for Alpine's ash shell (non-login interactive shells)
+    if [ ! -f /home/foreman/.ashrc ]; then
+        echo 'export PATH="\$HOME/.scripts:\$PATH"' > /home/foreman/.ashrc
+        chown foreman:foreman /home/foreman/.ashrc
+    fi
+    
+    # Add ENV variable to .profile to source .ashrc for all shells
+    if ! grep -q "ENV=" /home/foreman/.profile 2>/dev/null; then
+        echo "" >> /home/foreman/.profile
+        echo "# Source .ashrc for all shells (Alpine Linux compatibility)" >> /home/foreman/.profile
+        echo 'export ENV=\$HOME/.ashrc' >> /home/foreman/.profile
+    fi
+    
+    # Ensure .profile is owned by foreman (critical fix)
+    chown foreman:foreman /home/foreman/.profile
+    chown -R foreman:foreman /home/foreman/.scripts
+    
+    # Configure AWS directory
+    mkdir -p /home/foreman/.aws
+    chown -R foreman:foreman /home/foreman/.aws
+    
+    echo "✓ jcscripts collection installed (50+ scripts including gitproject)"
+    echo "JCSCRIPTS_OK" > /tmp/jcscripts.status
+} >> "\$INSTALL_LOG" 2>&1
 
 # Check results and report
 [ "\$(cat /tmp/k8s.status 2>/dev/null)" = "KUBERNETES_OK" ] && log_success "Kubernetes Tools installed" || {
