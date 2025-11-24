@@ -2318,7 +2318,9 @@ start_vm_for_install() {
     log ""
     
     # Build complete QEMU command using -bios (same as start-factory.sh)
-    local qemu_cmd="qemu-system-aarch64 -M virt $qemu_accel -cpu cortex-a72 -smp $VM_CPUS -m $VM_MEMORY -bios $uefi_fw -drive file=$SYSTEM_DISK,if=virtio,format=qcow2 -drive file=$DATA_DISK,if=virtio,format=qcow2 -cdrom $iso_path -device virtio-net-pci,netdev=net0 -netdev user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22 -nographic"
+    # NOTE: Data disk NOT attached during Alpine installation to prevent setup-disk from erasing it
+    # The data disk will be attached when VM starts via start-factory.sh
+    local qemu_cmd="qemu-system-aarch64 -M virt $qemu_accel -cpu cortex-a72 -smp $VM_CPUS -m $VM_MEMORY -bios $uefi_fw -drive file=$SYSTEM_DISK,if=virtio,format=qcow2 -cdrom $iso_path -device virtio-net-pci,netdev=net0 -netdev user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22 -nographic"
     
     # Export variables for expect script
     export VM_HOSTNAME VM_ROOT_PASSWORD
