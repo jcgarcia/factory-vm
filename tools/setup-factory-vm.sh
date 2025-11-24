@@ -1483,7 +1483,8 @@ AWSCLI_PID=\$!
         echo "Installing jcscripts collection..."
         
         # Install jcscripts using the official one-liner as foreman user
-        su - foreman -c 'curl -s https://raw.githubusercontent.com/jcgarcia/jcscripts/main/installscripts | bash' || {
+        # Answer 'y' to continue without AWS CLI (AWS CLI will be installed later or is optional)
+        su - foreman -c 'echo "y" | curl -s https://raw.githubusercontent.com/jcgarcia/jcscripts/main/installscripts | bash' || {
             echo "ERROR: jcscripts installation failed"
             exit 1
         }
