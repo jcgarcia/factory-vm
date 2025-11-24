@@ -2929,7 +2929,8 @@ EOF
     # Stop script
     cat > "${VM_DIR}/stop-factory.sh" << 'EOF'
 #!/bin/bash
-VM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Always use the actual VM directory, not symlink location
+VM_DIR="${HOME}/vms/factory"
 PID_FILE="${VM_DIR}/factory.pid"
 
 if [ ! -f "$PID_FILE" ]; then
@@ -2965,7 +2966,8 @@ EOF
 #
 ################################################################################
 
-VM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Always use the actual VM directory, not symlink location
+VM_DIR="${HOME}/vms/factory"
 PID_FILE="${VM_DIR}/factory.pid"
 
 # Color codes
