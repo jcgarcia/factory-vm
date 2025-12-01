@@ -794,7 +794,7 @@ export -f generate_secure_password
 export -f ssh_exec
 export -f command_exists wait_with_timeout
 export -f validate_config show_config
-/38             0           0     0     644     4007      `
+/38             0           0     0     644     4078      `
 #!/bin/bash
 # configure-jenkins.sh - Configure Jenkins after installation
 # Part of Phase 3.5 modular architecture
@@ -858,10 +858,11 @@ fi
 JENKINS_VERSION=$(sudo docker exec jenkins java -jar /usr/share/jenkins/jenkins.war --version 2>/dev/null)
 echo "✓ Jenkins version: $JENKINS_VERSION"
 
-# Download Jenkins CLI jar
+# Download Jenkins CLI jar from Jenkins server
 echo "Setting up Jenkins CLI..."
 sudo mkdir -p /usr/local/share/jenkins
-sudo docker cp jenkins:/usr/share/jenkins/jenkins-cli.jar /usr/local/share/jenkins/jenkins-cli.jar
+curl -sS http://localhost:8080/jnlpJars/jenkins-cli.jar -o /tmp/jenkins-cli.jar
+sudo mv /tmp/jenkins-cli.jar /usr/local/share/jenkins/jenkins-cli.jar
 sudo chmod 644 /usr/local/share/jenkins/jenkins-cli.jar
 echo "✓ Jenkins CLI jar installed to /usr/local/share/jenkins/"
 
@@ -907,7 +908,6 @@ EOF
 
 # Export functions
 export -f configure_jenkins_via_ssh
-
 /60             0           0     0     644     1022      `
 #!/bin/bash
 # install-awscli.sh - Install AWS CLI on Factory VM
@@ -1536,7 +1536,7 @@ EOF
 
 # Export functions
 export -f install_terraform_via_ssh
-setup-motd.sh/  0           0     0     644     3461      `
+setup-motd.sh/  0           0     0     644     3454      `
 #!/bin/bash
 # setup-motd.sh - Create welcome banner for Factory VM
 #
@@ -1577,7 +1577,7 @@ Welcome to your automated ARM64 build environment!
 🌐 Jenkins CI/CD Server:
   Web UI:    https://factory.local
   Username:  foreman
-  Password:  (see ~/.factory-vm/credentials.txt on host)
+  Password:  Run 'factorysecrets' on host to view
   
   CLI:       jenkins-factory <command>
              Available on HOST and inside VM
@@ -1629,7 +1629,6 @@ fi
 
 # Export functions
 export -f setup_motd_via_ssh
-
 vm-bootstrap.sh/0           0     0     644     9360      `
 #!/bin/bash
 # vm-bootstrap.sh - Bootstrap Factory VM after Alpine installation

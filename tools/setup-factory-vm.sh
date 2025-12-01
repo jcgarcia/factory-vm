@@ -348,13 +348,28 @@ EOF
 
     chmod +x "${VM_DIR}/status-factory.sh"
     
+    # Create factorysecrets script
+    cat > "${VM_DIR}/secrets-factory.sh" << 'SECRETS_SCRIPT'
+#!/bin/bash
+# Factory VM Secrets - Display credentials
+CREDS_FILE="$HOME/vms/factory/credentials.txt"
+if [ -f "$CREDS_FILE" ]; then
+    cat "$CREDS_FILE"
+else
+    echo "Error: Credentials file not found at $CREDS_FILE" >&2
+    exit 1
+fi
+SECRETS_SCRIPT
+    chmod +x "${VM_DIR}/secrets-factory.sh"
+    
     # Create convenience symlinks in ~/.scripts if it exists
     if [ -d "${HOME}/.scripts" ]; then
         log_info "Creating convenience links in ~/.scripts..."
         ln -sf "${VM_DIR}/start-factory.sh" "${HOME}/.scripts/factorystart"
         ln -sf "${VM_DIR}/stop-factory.sh" "${HOME}/.scripts/factorystop"
         ln -sf "${VM_DIR}/status-factory.sh" "${HOME}/.scripts/factorystatus"
-        log_success "Created: factorystart, factorystop, factorystatus"
+        ln -sf "${VM_DIR}/secrets-factory.sh" "${HOME}/.scripts/factorysecrets"
+        log_success "Created: factorystart, factorystop, factorystatus, factorysecrets"
     fi
     
     log_success "VM management scripts created"
