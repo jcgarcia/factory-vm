@@ -412,7 +412,7 @@ export -f download_and_cache_jenkins_image
 export -f cache_all_tools
 export -f download_and_cache_plugin
 export -f cache_all_plugins
-/18             0           0     0     644     7807      `
+/18             0           0     0     644     10441     `
 #!/bin/bash
 # install-jenkins.sh - Install Jenkins on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -583,6 +583,69 @@ println "    API Token saved to: /var/jenkins_home/foreman-api-token.txt"
 user.save()
 instance.save()
 GROOVY_USER
+
+# Create Docker Cloud agent configuration
+sudo tee /opt/jenkins/init.groovy.d/07-configure-docker-agent.groovy > /dev/null << 'GROOVY_AGENT'
+#!groovy
+import jenkins.model.Jenkins
+import com.nirima.jenkins.plugins.docker.DockerCloud
+import com.nirima.jenkins.plugins.docker.DockerTemplate
+import com.nirima.jenkins.plugins.docker.DockerTemplateBase
+import io.jenkins.docker.connector.DockerComputerAttachConnector
+
+def instance = Jenkins.getInstance()
+
+try {
+    println '--> Configuring Docker cloud for build agents...'
+    
+    // Check if Docker plugin is available
+    def dockerPluginClass = Class.forName('com.nirima.jenkins.plugins.docker.DockerCloud')
+    
+    // Create Docker cloud if it doesn't exist
+    def existingCloud = instance.clouds.find { it.name == 'docker' }
+    if (existingCloud == null) {
+        // Docker template for ARM64 builds
+        def dockerTemplateBase = new DockerTemplateBase('jenkins/inbound-agent:latest')
+        dockerTemplateBase.setDockerCommand('')
+        dockerTemplateBase.setVolumesString('')
+        dockerTemplateBase.setEnvironmentsString('')
+        
+        def dockerTemplate = new DockerTemplate(
+            dockerTemplateBase,
+            new DockerComputerAttachConnector(),
+            'docker linux arm64',  // Labels
+            '/home/jenkins/agent', // Remote FS root
+            '2'                    // Instance capacity
+        )
+        dockerTemplate.setMode(hudson.model.Node.Mode.NORMAL)
+        dockerTemplate.setRemoveVolumes(true)
+        
+        def dockerCloud = new DockerCloud(
+            'docker',              // Name
+            [dockerTemplate],      // Templates
+            100,                   // Container cap
+            'unix:///var/run/docker.sock'  // Docker host URI
+        )
+        
+        instance.clouds.add(dockerCloud)
+        instance.save()
+        
+        println "    Docker cloud configured successfully"
+        println "    - Image: jenkins/inbound-agent:latest"
+        println "    - Labels: docker linux arm64"
+        println "    - Executors: 2 per container"
+    } else {
+        println "    Docker cloud already exists"
+    }
+} catch (ClassNotFoundException e) {
+    println "    WARNING: Docker plugin not installed yet - agent setup skipped"
+    println "    This is normal on first install - plugins install after init scripts run"
+    println "    Run: jenkins-factory restart to apply after plugins install"
+} catch (Exception e) {
+    println "    WARNING: Error configuring Docker agent: ${e.message}"
+    println "    You can configure agents manually: Manage Jenkins > Clouds > New Cloud"
+}
+GROOVY_AGENT
 
 # Set ownership
 sudo chown -R 1000:1000 /opt/jenkins
