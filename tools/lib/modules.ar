@@ -412,7 +412,7 @@ export -f download_and_cache_jenkins_image
 export -f cache_all_tools
 export -f download_and_cache_plugin
 export -f cache_all_plugins
-/18             0           0     0     644     7065      `
+/18             0           0     0     644     7807      `
 #!/bin/bash
 # install-jenkins.sh - Install Jenkins on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -508,6 +508,27 @@ if (!instance.installState.isSetupComplete()) {
     println '--> Setup wizard skipped'
 }
 GROOVY_SKIP
+
+# Create init script to configure Jenkins URL and built-in node
+sudo tee /opt/jenkins/init.groovy.d/02-configure-jenkins.groovy > /dev/null << 'GROOVY_CONFIG'
+#!groovy
+import jenkins.model.Jenkins
+import jenkins.model.JenkinsLocationConfiguration
+
+def instance = Jenkins.getInstance()
+
+// Set Jenkins URL
+def locationConfig = JenkinsLocationConfiguration.get()
+locationConfig.setUrl('https://factory.local/')
+locationConfig.save()
+println '--> Jenkins URL set to https://factory.local/'
+
+// Disable builds on built-in node (security best practice)
+instance.setNumExecutors(0)
+instance.setMode(hudson.model.Node.Mode.EXCLUSIVE)
+instance.save()
+println '--> Built-in node configured (executors disabled - use agents for builds)'
+GROOVY_CONFIG
 
 # Create foreman user with API token
 sudo tee /opt/jenkins/init.groovy.d/05-create-foreman-user.groovy > /dev/null << 'GROOVY_USER'
@@ -773,7 +794,7 @@ export -f generate_secure_password
 export -f ssh_exec
 export -f command_exists wait_with_timeout
 export -f validate_config show_config
-/38             0           0     0     644     2627      `
+/38             0           0     0     644     4007      `
 #!/bin/bash
 # configure-jenkins.sh - Configure Jenkins after installation
 # Part of Phase 3.5 modular architecture
@@ -811,7 +832,7 @@ configure_jenkins_via_ssh() {
     
     log_success "  ✓ Jenkins is ready"
     
-    # Verify init scripts executed successfully
+    # Verify init scripts executed successfully and setup CLI
     ssh -i "$VM_SSH_PRIVATE_KEY" -p "$VM_SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=60 -o ServerAliveInterval=30 \
@@ -836,6 +857,42 @@ fi
 # Get Jenkins version for verification
 JENKINS_VERSION=$(sudo docker exec jenkins java -jar /usr/share/jenkins/jenkins.war --version 2>/dev/null)
 echo "✓ Jenkins version: $JENKINS_VERSION"
+
+# Download Jenkins CLI jar
+echo "Setting up Jenkins CLI..."
+sudo mkdir -p /usr/local/share/jenkins
+sudo docker cp jenkins:/usr/share/jenkins/jenkins-cli.jar /usr/local/share/jenkins/jenkins-cli.jar
+sudo chmod 644 /usr/local/share/jenkins/jenkins-cli.jar
+echo "✓ Jenkins CLI jar installed to /usr/local/share/jenkins/"
+
+# Create jenkins-factory CLI function for VM users
+sudo tee /etc/profile.d/jenkins-cli.sh > /dev/null << 'JENKINS_CLI_PROFILE'
+# Jenkins CLI helper function
+jenkins-factory() {
+    local api_token
+    
+    # Get token from Jenkins container (use sudo if needed)
+    if docker ps >/dev/null 2>&1; then
+        api_token=$(docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
+    else
+        api_token=$(sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
+    fi
+    
+    if [ -z "$api_token" ]; then
+        echo "Error: Could not retrieve API token from Jenkins" >&2
+        return 1
+    fi
+    
+    # Call Jenkins CLI with token directly in auth parameter
+    java -jar /usr/local/share/jenkins/jenkins-cli.jar \
+        -s https://factory.local \
+        -auth foreman:"$api_token" \
+        -webSocket \
+        "$@"
+}
+JENKINS_CLI_PROFILE
+sudo chmod +x /etc/profile.d/jenkins-cli.sh
+echo "✓ Jenkins CLI configured for VM users (jenkins-factory command)"
 
 echo "✓ Jenkins configured successfully"
 EOF
