@@ -190,7 +190,7 @@ fi
 
 touch "\${PID_FILE}"
 
-sudo qemu-system-aarch64 \\
+if ! sudo qemu-system-aarch64 \\
     -M virt \${QEMU_ACCEL} \\
     -cpu cortex-a72 \\
     -smp \${VM_CPUS} \\
@@ -202,11 +202,21 @@ sudo qemu-system-aarch64 \\
     -netdev user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22,hostfwd=tcp::443-:443 \\
     -display none \\
     -daemonize \\
-    -pidfile "\${PID_FILE}"
+    -pidfile "\${PID_FILE}"; then
+    echo "✗ Failed to start QEMU (check sudo permissions)"
+    exit 1
+fi
 
-echo "✓ Factory VM started"
-echo "  SSH: ssh factory"
-echo "  Jenkins: https://factory.local"
+# Verify QEMU is actually running
+sleep 1
+if [ -s "\${PID_FILE}" ] && kill -0 \$(cat "\${PID_FILE}") 2>/dev/null; then
+    echo "✓ Factory VM started"
+    echo "  SSH: ssh factory"
+    echo "  Jenkins: https://factory.local"
+else
+    echo "✗ QEMU process did not start properly"
+    exit 1
+fi
 EOF
 
     chmod +x "${VM_DIR}/start-factory.sh"

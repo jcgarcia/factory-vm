@@ -1765,7 +1765,7 @@ fi
 
 # Export functions
 export -f setup_motd_via_ssh
-vm-bootstrap.sh/0           0     0     644     9360      `
+vm-bootstrap.sh/0           0     0     644     9369      `
 #!/bin/bash
 # vm-bootstrap.sh - Bootstrap Factory VM after Alpine installation
 # Part of Phase 3.5 modular architecture
@@ -1808,8 +1808,8 @@ configure_installed_vm() {
     
     # Start VM using the start script
     log_info "Starting VM from installed system..."
-    if ! "${VM_DIR}/start-factory.sh" >/dev/null 2>&1; then
-        log_error "Failed to start Factory VM"
+    if ! "${VM_DIR}/start-factory.sh"; then
+        log_error "Failed to start Factory VM - check sudo permissions"
         exit 1
     fi
     
@@ -2033,6 +2033,7 @@ EOF
 
 # Export functions
 export -f setup_data_disk_in_vm configure_installed_vm
+
 vm-lifecycle.sh/0           0     0     644     10931     `
 #!/bin/bash
 # vm-lifecycle.sh - VM creation and lifecycle management
