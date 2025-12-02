@@ -22,6 +22,27 @@
 
 set -euo pipefail
 
+# Check if we're in a restricted terminal (VS Code with NoNewPrivs flag)
+if grep -q "NoNewPrivs:[[:space:]]*1" /proc/$$/status 2>/dev/null; then
+    if ! sudo -n true 2>/dev/null; then
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════╗"
+        echo "║  ⚠️  WARNING: Restricted Terminal Detected                ║"
+        echo "╠══════════════════════════════════════════════════════════╣"
+        echo "║  This terminal has security restrictions that prevent    ║"
+        echo "║  sudo from working (NoNewPrivs flag is set).             ║"
+        echo "║                                                          ║"
+        echo "║  This commonly happens in VS Code's integrated terminal. ║"
+        echo "║                                                          ║"
+        echo "║  Please run this command from a regular terminal:        ║"
+        echo "║    - Open a new terminal window (gnome-terminal, etc.)   ║"
+        echo "║    - Run the install command there                       ║"
+        echo "╚══════════════════════════════════════════════════════════╝"
+        echo ""
+        exit 1
+    fi
+fi
+
 # Trap errors and cleanup
 trap 'echo "ERROR: Installation failed at line $LINENO. Check logs for details." >&2; exit 1' ERR
 
@@ -171,11 +192,14 @@ NC='\033[0m'
 # Determine if we need sudo (for port 443 binding)
 # Skip sudo if already root or if sudo is not available/working
 SUDO_CMD=""
+HTTPS_PORT="443"
 if [ "\$(id -u)" != "0" ]; then
     if sudo -n true 2>/dev/null; then
         SUDO_CMD="sudo"
     else
-        echo -e "\${YELLOW}Note: Running without sudo - port 443 may not bind\${NC}"
+        # No sudo available - use high port for HTTPS
+        HTTPS_PORT="8443"
+        echo -e "\${YELLOW}Note: Running without sudo - using port 8443 for HTTPS\${NC}"
     fi
 fi
 
@@ -216,7 +240,7 @@ if ! \$SUDO_CMD qemu-system-aarch64 \\
     -drive file="\${SYSTEM_DISK}",if=virtio,format=qcow2 \\
     -drive file="\${DATA_DISK}",if=virtio,format=qcow2 \\
     -device virtio-net-pci,netdev=net0 \\
-    -netdev user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22,hostfwd=tcp::443-:443 \\
+    -netdev user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22,hostfwd=tcp::\${HTTPS_PORT}-:443 \\
     -display none \\
     -daemonize \\
     -pidfile "\${PID_FILE}"; then
@@ -229,7 +253,11 @@ sleep 1
 if [ -s "\${PID_FILE}" ] && kill -0 \$(cat "\${PID_FILE}") 2>/dev/null; then
     echo "✓ Factory VM started"
     echo "  SSH: ssh factory"
-    echo "  Jenkins: https://factory.local"
+    if [ "\${HTTPS_PORT}" = "443" ]; then
+        echo "  Jenkins: https://factory.local"
+    else
+        echo "  Jenkins: https://factory.local:\${HTTPS_PORT}"
+    fi
 else
     echo "✗ QEMU process did not start properly"
     exit 1
