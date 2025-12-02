@@ -211,8 +211,9 @@ else
     QEMU_ACCEL="-accel tcg"
 fi
 
-# Clear stale PID file before starting
-rm -f "\${PID_FILE}"
+# Create PID file as current user BEFORE sudo runs QEMU
+# This way QEMU updates the content but ownership stays with current user
+touch "\${PID_FILE}"
 
 \$SUDO_CMD qemu-system-aarch64 \\
     -M virt \${QEMU_ACCEL} \\
