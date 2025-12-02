@@ -22,26 +22,8 @@
 
 set -euo pipefail
 
-# Check if we're in a restricted terminal (VS Code with NoNewPrivs flag)
-if grep -q "NoNewPrivs:[[:space:]]*1" /proc/$$/status 2>/dev/null; then
-    if ! sudo -n true 2>/dev/null; then
-        echo ""
-        echo "╔══════════════════════════════════════════════════════════╗"
-        echo "║  ⚠️  WARNING: Restricted Terminal Detected                ║"
-        echo "╠══════════════════════════════════════════════════════════╣"
-        echo "║  This terminal has security restrictions that prevent    ║"
-        echo "║  sudo from working (NoNewPrivs flag is set).             ║"
-        echo "║                                                          ║"
-        echo "║  This commonly happens in VS Code's integrated terminal. ║"
-        echo "║                                                          ║"
-        echo "║  Please run this command from a regular terminal:        ║"
-        echo "║    - Open a new terminal window (gnome-terminal, etc.)   ║"
-        echo "║    - Run the install command there                       ║"
-        echo "╚══════════════════════════════════════════════════════════╝"
-        echo ""
-        exit 1
-    fi
-fi
+# Note: If running in a restricted terminal (VS Code with NoNewPrivs flag),
+# the start-factory.sh script will automatically use port 8443 instead of 443
 
 # Trap errors and cleanup
 trap 'echo "ERROR: Installation failed at line $LINENO. Check logs for details." >&2; exit 1' ERR
@@ -176,8 +158,8 @@ generate_start_script() {
     cat > "${VM_DIR}/start-factory.sh" << EOF
 #!/bin/bash
 VM_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-SYSTEM_DISK="${SYSTEM_DISK}"
-DATA_DISK="${DATA_DISK}"
+SYSTEM_DISK="\${VM_DIR}/factory.qcow2"
+DATA_DISK="\${VM_DIR}/factory-data.qcow2"
 UEFI_FW="${uefi_fw}"
 VM_MEMORY="${VM_MEMORY}"
 VM_CPUS="${VM_CPUS}"
@@ -229,9 +211,10 @@ else
     QEMU_ACCEL="-accel tcg"
 fi
 
-touch "\${PID_FILE}"
+# Clear stale PID file before starting
+rm -f "\${PID_FILE}"
 
-if ! \$SUDO_CMD qemu-system-aarch64 \\
+\$SUDO_CMD qemu-system-aarch64 \\
     -M virt \${QEMU_ACCEL} \\
     -cpu cortex-a72 \\
     -smp \${VM_CPUS} \\
@@ -243,10 +226,7 @@ if ! \$SUDO_CMD qemu-system-aarch64 \\
     -netdev user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22,hostfwd=tcp::\${HTTPS_PORT}-:443 \\
     -display none \\
     -daemonize \\
-    -pidfile "\${PID_FILE}"; then
-    echo -e "\${RED}✗ Failed to start QEMU\${NC}"
-    exit 1
-fi
+    -pidfile "\${PID_FILE}"
 
 # Verify QEMU is actually running
 sleep 1
@@ -259,7 +239,7 @@ if [ -s "\${PID_FILE}" ] && kill -0 \$(cat "\${PID_FILE}") 2>/dev/null; then
         echo "  Jenkins: https://factory.local:\${HTTPS_PORT}"
     fi
 else
-    echo "✗ QEMU process did not start properly"
+    echo -e "\${RED}✗ QEMU process did not start properly\${NC}"
     exit 1
 fi
 EOF
