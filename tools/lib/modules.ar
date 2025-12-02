@@ -927,7 +927,7 @@ export -f generate_secure_password
 export -f ssh_exec
 export -f command_exists wait_with_timeout
 export -f validate_config show_config
-/38             0           0     0     644     4158      `
+/38             0           0     0     644     4495      `
 #!/bin/bash
 # configure-jenkins.sh - Configure Jenkins after installation
 # Part of Phase 3.5 modular architecture
@@ -941,11 +941,14 @@ fi
 configure_jenkins_via_ssh() {
     log_info "Configuring Jenkins via SSH..."
     
-    # Wait for Jenkins to be ready
+    # Wait for Jenkins to be ready AND for init scripts to complete
     log_info "  Waiting for Jenkins to be fully initialized (this can take 2-3 minutes)..."
     log_info "  Init scripts should auto-create foreman user and API token..."
     
     local jenkins_ready=0
+    local token_ready=0
+    
+    # First wait for Jenkins to respond
     for i in {1..90}; do
         if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -p "$VM_SSH_PORT" foreman@localhost "curl -s http://localhost:8080/login >/dev/null 2>&1"; then
@@ -953,13 +956,33 @@ configure_jenkins_via_ssh() {
             break
         fi
         if [ $((i % 10)) -eq 0 ]; then
-            log_info "  Still waiting... ($((i * 2)) seconds elapsed)"
+            log_info "  Still waiting for Jenkins... ($((i * 2)) seconds elapsed)"
         fi
         sleep 2
     done
     
     if [ $jenkins_ready -eq 0 ]; then
         log_error "Jenkins did not become ready in time"
+        return 1
+    fi
+    
+    log_info "  Jenkins is responding, waiting for init scripts to complete..."
+    
+    # Now wait for the API token file to exist (init scripts completed)
+    for i in {1..60}; do
+        if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$VM_SSH_PORT" foreman@localhost "sudo docker exec jenkins test -f /var/jenkins_home/foreman-api-token.txt" 2>/dev/null; then
+            token_ready=1
+            break
+        fi
+        if [ $((i % 10)) -eq 0 ]; then
+            log_info "  Waiting for API token... ($((i * 2)) seconds elapsed)"
+        fi
+        sleep 2
+    done
+    
+    if [ $token_ready -eq 0 ]; then
+        log_error "API token was not created - init scripts may have failed"
         return 1
     fi
     
@@ -972,20 +995,8 @@ configure_jenkins_via_ssh() {
         foreman@localhost << 'EOF'
 echo "Verifying Jenkins configuration..."
 
-# Check if foreman user API token was created by init scripts
-if sudo docker exec jenkins test -f /var/jenkins_home/foreman-api-token.txt; then
-    echo "✓ Foreman user and API token created successfully by init scripts"
-else
-    echo "⚠ API token file not found - init scripts may still be processing"
-    echo "  Waiting additional 30 seconds for init scripts to complete..."
-    sleep 30
-    if sudo docker exec jenkins test -f /var/jenkins_home/foreman-api-token.txt; then
-        echo "✓ API token now exists"
-    else
-        echo "✗ API token still not found - manual configuration may be needed"
-        exit 1
-    fi
-fi
+# Token already verified to exist by the installer
+echo "✓ API token exists"
 
 # Get Jenkins version for verification
 JENKINS_VERSION=$(sudo docker exec jenkins java -jar /usr/share/jenkins/jenkins.war --version 2>/dev/null)
@@ -1042,6 +1053,7 @@ EOF
 
 # Export functions
 export -f configure_jenkins_via_ssh
+
 /60             0           0     0     644     1022      `
 #!/bin/bash
 # install-awscli.sh - Install AWS CLI on Factory VM
