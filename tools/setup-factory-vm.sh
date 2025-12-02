@@ -22,9 +22,6 @@
 
 set -euo pipefail
 
-# Note: If running in a restricted terminal (VS Code with NoNewPrivs flag),
-# the start-factory.sh script will automatically use port 8443 instead of 443
-
 # Trap errors and cleanup
 trap 'echo "ERROR: Installation failed at line $LINENO. Check logs for details." >&2; exit 1' ERR
 
@@ -158,8 +155,8 @@ generate_start_script() {
     cat > "${VM_DIR}/start-factory.sh" << EOF
 #!/bin/bash
 VM_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-SYSTEM_DISK="\${VM_DIR}/factory.qcow2"
-DATA_DISK="\${VM_DIR}/factory-data.qcow2"
+SYSTEM_DISK="${SYSTEM_DISK}"
+DATA_DISK="${DATA_DISK}"
 UEFI_FW="${uefi_fw}"
 VM_MEMORY="${VM_MEMORY}"
 VM_CPUS="${VM_CPUS}"
@@ -168,36 +165,16 @@ PID_FILE="\${VM_DIR}/factory.pid"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
-# Determine if we need sudo (for port 443 binding)
-# Skip sudo if already root or if sudo is not available/working
-SUDO_CMD=""
-HTTPS_PORT="443"
-if [ "\$(id -u)" != "0" ]; then
-    if sudo -n true 2>/dev/null; then
-        SUDO_CMD="sudo"
-    else
-        # No sudo available - use high port for HTTPS
-        HTTPS_PORT="8443"
-        echo -e "\${YELLOW}Note: Running without sudo - using port 8443 for HTTPS\${NC}"
-    fi
-fi
-
-if [ -f "\$PID_FILE" ] && [ -s "\$PID_FILE" ]; then
-    PID=\$(cat "\$PID_FILE")
-    if kill -0 "\$PID" 2>/dev/null; then
-        echo -e "\${YELLOW}Factory VM is already running\${NC}"
-        echo "  Connect: ssh factory"
-        exit 0
-    fi
+if [ -f "\$PID_FILE" ] && sudo kill -0 \$(cat "\$PID_FILE") 2>/dev/null; then
+    echo -e "\${YELLOW}Factory VM is already running\${NC}"
+    echo "  Connect: ssh factory"
+    exit 0
 fi
 
 if ! grep -q "factory.local" /etc/hosts 2>/dev/null; then
-    if [ -n "\$SUDO_CMD" ]; then
-        echo "127.0.0.1 factory.local" | \$SUDO_CMD tee -a /etc/hosts > /dev/null
-    fi
+    echo "127.0.0.1 factory.local" | sudo tee -a /etc/hosts > /dev/null
 fi
 
 echo -e "\${GREEN}Starting Factory VM...\${NC}"
@@ -211,11 +188,9 @@ else
     QEMU_ACCEL="-accel tcg"
 fi
 
-# Create PID file as current user BEFORE sudo runs QEMU
-# This way QEMU updates the content but ownership stays with current user
 touch "\${PID_FILE}"
 
-\$SUDO_CMD qemu-system-aarch64 \\
+sudo qemu-system-aarch64 \\
     -M virt \${QEMU_ACCEL} \\
     -cpu cortex-a72 \\
     -smp \${VM_CPUS} \\
@@ -224,25 +199,14 @@ touch "\${PID_FILE}"
     -drive file="\${SYSTEM_DISK}",if=virtio,format=qcow2 \\
     -drive file="\${DATA_DISK}",if=virtio,format=qcow2 \\
     -device virtio-net-pci,netdev=net0 \\
-    -netdev user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22,hostfwd=tcp::\${HTTPS_PORT}-:443 \\
+    -netdev user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22,hostfwd=tcp::443-:443 \\
     -display none \\
     -daemonize \\
     -pidfile "\${PID_FILE}"
 
-# Verify QEMU is actually running
-sleep 1
-if [ -s "\${PID_FILE}" ] && kill -0 \$(cat "\${PID_FILE}") 2>/dev/null; then
-    echo "✓ Factory VM started"
-    echo "  SSH: ssh factory"
-    if [ "\${HTTPS_PORT}" = "443" ]; then
-        echo "  Jenkins: https://factory.local"
-    else
-        echo "  Jenkins: https://factory.local:\${HTTPS_PORT}"
-    fi
-else
-    echo -e "\${RED}✗ QEMU process did not start properly\${NC}"
-    exit 1
-fi
+echo "✓ Factory VM started"
+echo "  SSH: ssh factory"
+echo "  Jenkins: https://factory.local"
 EOF
 
     chmod +x "${VM_DIR}/start-factory.sh"
@@ -252,15 +216,15 @@ EOF
 #!/bin/bash
 PID_FILE="$(dirname "${BASH_SOURCE[0]}")/factory.pid"
 
-if [ ! -f "$PID_FILE" ] || [ ! -s "$PID_FILE" ]; then
+if [ ! -f "$PID_FILE" ]; then
     echo "Factory VM is not running"
     exit 0
 fi
 
 PID=$(cat "$PID_FILE")
-if kill -0 "$PID" 2>/dev/null; then
+if sudo kill -0 "$PID" 2>/dev/null; then
     echo "Stopping Factory VM..."
-    kill "$PID"
+    sudo kill "$PID"
     rm -f "$PID_FILE"
     echo "✓ Factory VM stopped"
 else
@@ -304,8 +268,8 @@ if [ ! -f "$PID_FILE" ]; then
     exit 1
 fi
 
-# Check if process is actually running
-PID=$(cat "$PID_FILE" 2>/dev/null)
+# Check if process is actually running (handle root-owned PID file)
+PID=$(sudo cat "$PID_FILE" 2>/dev/null || cat "$PID_FILE" 2>/dev/null)
 if [ -z "$PID" ]; then
     echo -e "${RED}✗ Cannot read PID file${NC}"
     echo "  PID file: $PID_FILE"
@@ -322,7 +286,7 @@ if [ -z "$PID" ]; then
 elif ! ps -p "$PID" > /dev/null 2>&1; then
     echo -e "${RED}✗ VM process not found (stale PID file)${NC}"
     echo "  PID file exists but process $PID is not running"
-    rm -f "$PID_FILE" 2>/dev/null
+    sudo rm -f "$PID_FILE" 2>/dev/null || rm -f "$PID_FILE" 2>/dev/null
     echo ""
     echo "Start the VM with:"
     echo "  ${VM_DIR}/start-factory.sh"
@@ -350,17 +314,17 @@ fi
 
 # Check HTTPS (port 443)
 echo -n "HTTPS (port 443): "
-if nc -z localhost 443 2>/dev/null; then
+if sudo lsof -i:443 >/dev/null 2>&1; then
     echo -e "${GREEN}✓ forwarded${NC}"
     
     # Check if Jenkins is accessible
-    if curl -sSLk --max-time 2 https://factory.local/ -o /dev/null 2>/dev/null; then
+    if curl -sSL --max-time 2 https://factory.local/ -o /dev/null 2>/dev/null; then
         echo "  Jenkins: responding"
     else
         echo -e "  ${YELLOW}Jenkins: not responding yet${NC}"
     fi
 else
-    echo -e "${YELLOW}⚠ not forwarded${NC}"
+    echo -e "${YELLOW}⚠ not forwarded (sudo issue?)${NC}"
 fi
 
 echo ""
@@ -384,28 +348,13 @@ EOF
 
     chmod +x "${VM_DIR}/status-factory.sh"
     
-    # Create factorysecrets script
-    cat > "${VM_DIR}/secrets-factory.sh" << 'SECRETS_SCRIPT'
-#!/bin/bash
-# Factory VM Secrets - Display credentials
-CREDS_FILE="$HOME/vms/factory/credentials.txt"
-if [ -f "$CREDS_FILE" ]; then
-    cat "$CREDS_FILE"
-else
-    echo "Error: Credentials file not found at $CREDS_FILE" >&2
-    exit 1
-fi
-SECRETS_SCRIPT
-    chmod +x "${VM_DIR}/secrets-factory.sh"
-    
     # Create convenience symlinks in ~/.scripts if it exists
     if [ -d "${HOME}/.scripts" ]; then
         log_info "Creating convenience links in ~/.scripts..."
         ln -sf "${VM_DIR}/start-factory.sh" "${HOME}/.scripts/factorystart"
         ln -sf "${VM_DIR}/stop-factory.sh" "${HOME}/.scripts/factorystop"
         ln -sf "${VM_DIR}/status-factory.sh" "${HOME}/.scripts/factorystatus"
-        ln -sf "${VM_DIR}/secrets-factory.sh" "${HOME}/.scripts/factorysecrets"
-        log_success "Created: factorystart, factorystop, factorystatus, factorysecrets"
+        log_success "Created: factorystart, factorystop, factorystatus"
     fi
     
     log_success "VM management scripts created"
@@ -445,103 +394,6 @@ Host factory
 EOF
 
     log_success "SSH config updated (ssh factory)"
-}
-
-setup_host_jenkins_cli() {
-    log "Setting up Jenkins CLI on host..."
-    
-    # Create directory for Jenkins CLI jar
-    mkdir -p ~/.java/jars
-    
-    # Copy Jenkins CLI jar from VM
-    scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" \
-        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        foreman@localhost:/usr/local/share/jenkins/jenkins-cli.jar \
-        ~/.java/jars/jenkins-cli-factory.jar 2>/dev/null || {
-        log_warning "Could not copy Jenkins CLI jar - will be downloaded on first use"
-    }
-    
-    # Get and cache the API token
-    local api_token
-    api_token=$(ssh -i "$VM_SSH_PRIVATE_KEY" -p "$VM_SSH_PORT" \
-        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        foreman@localhost "sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null" | tr -d '\n\r')
-    
-    if [ -n "$api_token" ]; then
-        echo "$api_token" > ~/.jenkins-factory-token
-        chmod 600 ~/.jenkins-factory-token
-        log_success "API token cached to ~/.jenkins-factory-token"
-    fi
-    
-    # Add jenkins-factory function to .bashrc if not already present
-    if ! grep -q "jenkins-factory()" ~/.bashrc 2>/dev/null; then
-        log_info "Adding jenkins-factory function to ~/.bashrc..."
-        
-        cat >> ~/.bashrc << 'JENKINS_BASHRC'
-
-################################################################################
-# Jenkins Factory CLI Helper
-################################################################################
-# Usage:
-#   jenkins-factory help                    # Show available commands
-#   jenkins-factory who-am-i                # Verify authentication
-#   jenkins-factory list-jobs               # List all jobs
-#   jenkins-factory build <job-name>        # Trigger a build
-################################################################################
-
-jenkins-factory() {
-    local api_token
-    
-    # Load token from cache or fetch new one
-    if [ -f ~/.jenkins-factory-token ]; then
-        api_token=$(cat ~/.jenkins-factory-token)
-    else
-        api_token=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p 2222 foreman@localhost \
-            "sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null" 2>/dev/null | tr -d '\n\r')
-        if [ -n "$api_token" ]; then
-            echo "$api_token" > ~/.jenkins-factory-token
-            chmod 600 ~/.jenkins-factory-token
-        fi
-    fi
-    
-    if [ -z "$api_token" ]; then
-        echo "ERROR: Could not get Jenkins API token" >&2
-        echo "Make sure Factory VM is running: factorystart" >&2
-        return 1
-    fi
-    
-    # Download CLI jar if not present
-    if [ ! -f ~/.java/jars/jenkins-cli-factory.jar ]; then
-        echo "Downloading Jenkins CLI jar..."
-        mkdir -p ~/.java/jars
-        scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -P 2222 foreman@localhost:/usr/local/share/jenkins/jenkins-cli.jar \
-            ~/.java/jars/jenkins-cli-factory.jar 2>/dev/null || {
-            echo "ERROR: Could not download Jenkins CLI jar" >&2
-            return 1
-        }
-    fi
-    
-    java -jar ~/.java/jars/jenkins-cli-factory.jar \
-        -s https://factory.local \
-        -auth foreman:"$api_token" \
-        -webSocket \
-        "$@"
-}
-
-JENKINS_BASHRC
-        
-        log_success "jenkins-factory function added to ~/.bashrc"
-        log_info "Reload with: source ~/.bashrc"
-    else
-        log_info "jenkins-factory function already exists in ~/.bashrc"
-        # Update the token file
-        if [ -n "$api_token" ]; then
-            echo "$api_token" > ~/.jenkins-factory-token
-            chmod 600 ~/.jenkins-factory-token
-        fi
-    fi
 }
 
 create_documentation() {
@@ -676,7 +528,6 @@ BANNER
     # Host configuration
     configure_host_ssh
     install_certificates_on_host
-    setup_host_jenkins_cli
     create_documentation
     
     # Calculate installation time
