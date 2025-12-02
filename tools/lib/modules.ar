@@ -412,7 +412,7 @@ export -f download_and_cache_jenkins_image
 export -f cache_all_tools
 export -f download_and_cache_plugin
 export -f cache_all_plugins
-/18             0           0     0     644     7065      `
+/18             0           0     0     644     12452     `
 #!/bin/bash
 # install-jenkins.sh - Install Jenkins on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -509,6 +509,27 @@ if (!instance.installState.isSetupComplete()) {
 }
 GROOVY_SKIP
 
+# Create init script to configure Jenkins URL and built-in node
+sudo tee /opt/jenkins/init.groovy.d/02-configure-jenkins.groovy > /dev/null << 'GROOVY_CONFIG'
+#!groovy
+import jenkins.model.Jenkins
+import jenkins.model.JenkinsLocationConfiguration
+
+def instance = Jenkins.getInstance()
+
+// Set Jenkins URL
+def locationConfig = JenkinsLocationConfiguration.get()
+locationConfig.setUrl('https://factory.local/')
+locationConfig.save()
+println '--> Jenkins URL set to https://factory.local/'
+
+// Disable builds on built-in node (security best practice)
+instance.setNumExecutors(0)
+instance.setMode(hudson.model.Node.Mode.EXCLUSIVE)
+instance.save()
+println '--> Built-in node configured (executors disabled - use agents for builds)'
+GROOVY_CONFIG
+
 # Create foreman user with API token
 sudo tee /opt/jenkins/init.groovy.d/05-create-foreman-user.groovy > /dev/null << 'GROOVY_USER'
 #!groovy
@@ -563,8 +584,142 @@ user.save()
 instance.save()
 GROOVY_USER
 
+# Create Docker Cloud agent configuration
+sudo tee /opt/jenkins/init.groovy.d/07-configure-docker-agent.groovy > /dev/null << 'GROOVY_AGENT'
+#!groovy
+import jenkins.model.Jenkins
+import com.nirima.jenkins.plugins.docker.DockerCloud
+import com.nirima.jenkins.plugins.docker.DockerTemplate
+import com.nirima.jenkins.plugins.docker.DockerTemplateBase
+import io.jenkins.docker.connector.DockerComputerAttachConnector
+import io.jenkins.docker.client.DockerAPI
+import org.jenkinsci.plugins.docker.commons.credentials.DockerServerEndpoint
+
+def instance = Jenkins.getInstance()
+
+try {
+    println '--> Configuring Docker cloud for build agents...'
+    
+    // Check if Docker plugin is available
+    def dockerPluginClass = Class.forName('com.nirima.jenkins.plugins.docker.DockerCloud')
+    
+    // Create Docker cloud if it doesn't exist
+    def existingCloud = instance.clouds.find { it.name == 'docker' }
+    if (existingCloud == null) {
+        // Docker template for ARM64 builds
+        def dockerTemplateBase = new DockerTemplateBase('jenkins/inbound-agent:latest')
+        dockerTemplateBase.setDockerCommand('')
+        dockerTemplateBase.setVolumesString('')
+        dockerTemplateBase.setEnvironmentsString('')
+        
+        def dockerTemplate = new DockerTemplate(
+            dockerTemplateBase,
+            new DockerComputerAttachConnector(),
+            'docker linux arm64',  // Labels
+            '/home/jenkins/agent', // Remote FS root
+            '2'                    // Instance capacity
+        )
+        dockerTemplate.setMode(hudson.model.Node.Mode.NORMAL)
+        dockerTemplate.setRemoveVolumes(true)
+        
+        // Create DockerAPI with local socket connection (new API)
+        def dockerServerEndpoint = new DockerServerEndpoint('unix:///var/run/docker.sock', null)
+        def dockerApi = new DockerAPI(dockerServerEndpoint)
+        
+        // Create DockerCloud with new constructor: (name, dockerApi, templates)
+        def dockerCloud = new DockerCloud('docker', dockerApi, [dockerTemplate])
+        dockerCloud.setContainerCap(100)
+        
+        instance.clouds.add(dockerCloud)
+        instance.save()
+        
+        println "    Docker cloud configured successfully"
+        println "    - Image: jenkins/inbound-agent:latest"
+        println "    - Labels: docker linux arm64"
+        println "    - Executors: 2 per container"
+    } else {
+        println "    Docker cloud already exists"
+    }
+} catch (ClassNotFoundException e) {
+    println "    WARNING: Docker plugin not installed yet - agent setup skipped"
+    println "    This is normal on first install - plugins install after init scripts run"
+    println "    Run: jenkins-factory restart to apply after plugins install"
+} catch (Exception e) {
+    println "    WARNING: Error configuring Docker agent: ${e.message}"
+    println "    You can configure agents manually: Manage Jenkins > Clouds > New Cloud"
+}
+GROOVY_AGENT
+
 # Set ownership
 sudo chown -R 1000:1000 /opt/jenkins
+
+# Install plugins BEFORE starting Jenkins using jenkins-plugin-cli
+# This is crucial: plugins must be installed BEFORE init scripts run
+# because the Docker Cloud groovy script imports plugin classes at compile time
+echo "Installing Jenkins plugins (this ensures Docker Cloud agent works)..."
+
+# Create plugins.txt with required plugins
+# jenkins-plugin-cli will automatically resolve all dependencies
+cat > /tmp/plugins.txt << 'PLUGINS_LIST'
+# Core plugins needed for Docker Cloud agent
+docker-plugin
+docker-workflow
+
+# Git and GitHub integration
+git
+git-client
+github
+github-branch-source
+
+# Pipeline support
+workflow-aggregator
+pipeline-stage-view
+pipeline-github-lib
+
+# Configuration as Code
+configuration-as-code
+
+# Blue Ocean UI
+blueocean
+
+# Credentials management
+credentials
+credentials-binding
+plain-credentials
+ssh-credentials
+
+# Cloud providers
+aws-credentials
+kubernetes
+kubernetes-cli
+
+# Build tools
+gradle
+nodejs
+
+# Utility plugins
+timestamper
+build-timeout
+ws-cleanup
+ansicolor
+PLUGINS_LIST
+
+# Run jenkins-plugin-cli in a temporary container to install plugins
+# This downloads plugins WITH all their dependencies to /opt/jenkins/plugins
+echo "  Running jenkins-plugin-cli to install plugins and dependencies..."
+sudo docker run --rm \
+    -v /opt/jenkins:/var/jenkins_home \
+    -v /tmp/plugins.txt:/plugins.txt \
+    jenkins/jenkins:lts-jdk21 \
+    jenkins-plugin-cli --plugin-file /plugins.txt --plugin-download-directory /var/jenkins_home/plugins
+
+if [ $? -eq 0 ]; then
+    echo "  ✓ Plugins installed successfully"
+    # Fix ownership after plugin installation
+    sudo chown -R 1000:1000 /opt/jenkins/plugins
+else
+    echo "  ⚠ Plugin installation had errors (Jenkins may still work)"
+fi
 
 # Start Jenkins container with volume mount
 echo "Starting Jenkins container..."
@@ -592,7 +747,6 @@ EOF
 
 # Export functions
 export -f install_jenkins_via_ssh
-
 common.sh/      0           0     0     644     5464      `
 #!/bin/bash
 # common.sh - Shared utilities for Factory VM setup
@@ -773,7 +927,7 @@ export -f generate_secure_password
 export -f ssh_exec
 export -f command_exists wait_with_timeout
 export -f validate_config show_config
-/38             0           0     0     644     2627      `
+/38             0           0     0     644     4158      `
 #!/bin/bash
 # configure-jenkins.sh - Configure Jenkins after installation
 # Part of Phase 3.5 modular architecture
@@ -811,7 +965,7 @@ configure_jenkins_via_ssh() {
     
     log_success "  ✓ Jenkins is ready"
     
-    # Verify init scripts executed successfully
+    # Verify init scripts executed successfully and setup CLI
     ssh -i "$VM_SSH_PRIVATE_KEY" -p "$VM_SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=60 -o ServerAliveInterval=30 \
@@ -837,6 +991,44 @@ fi
 JENKINS_VERSION=$(sudo docker exec jenkins java -jar /usr/share/jenkins/jenkins.war --version 2>/dev/null)
 echo "✓ Jenkins version: $JENKINS_VERSION"
 
+# Download Jenkins CLI jar
+echo "Setting up Jenkins CLI..."
+sudo mkdir -p /usr/local/share/jenkins
+sudo docker cp jenkins:/usr/share/jenkins/jenkins-cli.jar /usr/local/share/jenkins/jenkins-cli.jar
+sudo chmod 644 /usr/local/share/jenkins/jenkins-cli.jar
+echo "✓ Jenkins CLI jar installed to /usr/local/share/jenkins/"
+
+# Create jenkins-factory CLI function for VM users
+sudo tee /etc/profile.d/jenkins-cli.sh > /dev/null << 'JENKINS_CLI_PROFILE'
+# Jenkins CLI helper function
+jenkins-factory() {
+    local api_token
+    
+    # Get token from Jenkins container (use sudo if needed)
+    if docker ps >/dev/null 2>&1; then
+        api_token=$(docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
+    else
+        api_token=$(sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null | tr -d '\n\r')
+    fi
+    
+    if [ -z "$api_token" ]; then
+        echo "Error: Could not retrieve API token from Jenkins" >&2
+        return 1
+    fi
+    
+    # Call Jenkins CLI with token directly in auth parameter
+    # Use localhost:8080 (direct to container) instead of https://factory.local
+    # This avoids SSL certificate issues with Caddy's self-signed cert
+    java -jar /usr/local/share/jenkins/jenkins-cli.jar \
+        -s http://localhost:8080 \
+        -auth foreman:"$api_token" \
+        -webSocket \
+        "$@"
+}
+JENKINS_CLI_PROFILE
+sudo chmod +x /etc/profile.d/jenkins-cli.sh
+echo "✓ Jenkins CLI configured for VM users (jenkins-factory command)"
+
 echo "✓ Jenkins configured successfully"
 EOF
     
@@ -850,7 +1042,6 @@ EOF
 
 # Export functions
 export -f configure_jenkins_via_ssh
-
 /60             0           0     0     644     1022      `
 #!/bin/bash
 # install-awscli.sh - Install AWS CLI on Factory VM

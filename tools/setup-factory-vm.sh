@@ -348,13 +348,28 @@ EOF
 
     chmod +x "${VM_DIR}/status-factory.sh"
     
+    # Create secrets script
+    cat > "${VM_DIR}/secrets-factory.sh" << 'SECRETS_SCRIPT'
+#!/bin/bash
+# Factory VM Secrets - Display credentials
+CREDS_FILE="$HOME/vms/factory/credentials.txt"
+if [ -f "$CREDS_FILE" ]; then
+    cat "$CREDS_FILE"
+else
+    echo "Error: Credentials file not found at $CREDS_FILE" >&2
+    exit 1
+fi
+SECRETS_SCRIPT
+    chmod +x "${VM_DIR}/secrets-factory.sh"
+    
     # Create convenience symlinks in ~/.scripts if it exists
     if [ -d "${HOME}/.scripts" ]; then
         log_info "Creating convenience links in ~/.scripts..."
         ln -sf "${VM_DIR}/start-factory.sh" "${HOME}/.scripts/factorystart"
         ln -sf "${VM_DIR}/stop-factory.sh" "${HOME}/.scripts/factorystop"
         ln -sf "${VM_DIR}/status-factory.sh" "${HOME}/.scripts/factorystatus"
-        log_success "Created: factorystart, factorystop, factorystatus"
+        ln -sf "${VM_DIR}/secrets-factory.sh" "${HOME}/.scripts/factorysecrets"
+        log_success "Created: factorystart, factorystop, factorystatus, factorysecrets"
     fi
     
     log_success "VM management scripts created"
@@ -394,6 +409,103 @@ Host factory
 EOF
 
     log_success "SSH config updated (ssh factory)"
+}
+
+setup_host_jenkins_cli() {
+    log "Setting up Jenkins CLI on host..."
+    
+    # Create directory for Jenkins CLI jar
+    mkdir -p ~/.java/jars
+    
+    # Copy Jenkins CLI jar from VM
+    scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" \
+        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        foreman@localhost:/usr/local/share/jenkins/jenkins-cli.jar \
+        ~/.java/jars/jenkins-cli-factory.jar 2>/dev/null || {
+        log_warning "Could not copy Jenkins CLI jar - will be downloaded on first use"
+    }
+    
+    # Get and cache the API token
+    local api_token
+    api_token=$(ssh -i "$VM_SSH_PRIVATE_KEY" -p "$VM_SSH_PORT" \
+        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        foreman@localhost "sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null" | tr -d '\n\r')
+    
+    if [ -n "$api_token" ]; then
+        echo "$api_token" > ~/.jenkins-factory-token
+        chmod 600 ~/.jenkins-factory-token
+        log_success "API token cached to ~/.jenkins-factory-token"
+    fi
+    
+    # Add jenkins-factory function to .bashrc if not already present
+    if ! grep -q "jenkins-factory()" ~/.bashrc 2>/dev/null; then
+        log_info "Adding jenkins-factory function to ~/.bashrc..."
+        
+        cat >> ~/.bashrc << 'JENKINS_BASHRC'
+
+################################################################################
+# Jenkins Factory CLI Helper
+################################################################################
+# Usage:
+#   jenkins-factory help                    # Show available commands
+#   jenkins-factory who-am-i                # Verify authentication
+#   jenkins-factory list-jobs               # List all jobs
+#   jenkins-factory build <job-name>        # Trigger a build
+################################################################################
+
+jenkins-factory() {
+    local api_token
+    
+    # Load token from cache or fetch new one
+    if [ -f ~/.jenkins-factory-token ]; then
+        api_token=$(cat ~/.jenkins-factory-token)
+    else
+        api_token=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p 2222 foreman@localhost \
+            "sudo docker exec jenkins cat /var/jenkins_home/foreman-api-token.txt 2>/dev/null" 2>/dev/null | tr -d '\n\r')
+        if [ -n "$api_token" ]; then
+            echo "$api_token" > ~/.jenkins-factory-token
+            chmod 600 ~/.jenkins-factory-token
+        fi
+    fi
+    
+    if [ -z "$api_token" ]; then
+        echo "ERROR: Could not get Jenkins API token" >&2
+        echo "Make sure Factory VM is running: factorystart" >&2
+        return 1
+    fi
+    
+    # Download CLI jar if not present
+    if [ ! -f ~/.java/jars/jenkins-cli-factory.jar ]; then
+        echo "Downloading Jenkins CLI jar..."
+        mkdir -p ~/.java/jars
+        scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -P 2222 foreman@localhost:/usr/local/share/jenkins/jenkins-cli.jar \
+            ~/.java/jars/jenkins-cli-factory.jar 2>/dev/null || {
+            echo "ERROR: Could not download Jenkins CLI jar" >&2
+            return 1
+        }
+    fi
+    
+    java -jar ~/.java/jars/jenkins-cli-factory.jar \
+        -s https://factory.local \
+        -auth foreman:"$api_token" \
+        -webSocket \
+        "$@"
+}
+
+JENKINS_BASHRC
+        
+        log_success "jenkins-factory function added to ~/.bashrc"
+        log_info "Reload with: source ~/.bashrc"
+    else
+        log_info "jenkins-factory function already exists in ~/.bashrc"
+        # Update the token file
+        if [ -n "$api_token" ]; then
+            echo "$api_token" > ~/.jenkins-factory-token
+            chmod 600 ~/.jenkins-factory-token
+        fi
+    fi
 }
 
 create_documentation() {
@@ -528,6 +640,7 @@ BANNER
     # Host configuration
     configure_host_ssh
     install_certificates_on_host
+    setup_host_jenkins_cli
     create_documentation
     
     # Calculate installation time
