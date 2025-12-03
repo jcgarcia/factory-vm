@@ -118,6 +118,23 @@ ssh factory
 - Git, Node.js, Python, OpenJDK
 - Build tools: gcc, g++, make, cmake
 
+### Optional Add-ons (via utility scripts)
+
+- **Ansible** with AWS modules (boto3, botocore) - `./install-ansible.sh`
+- **Android SDK** with Gradle - `./install-android-sdk.sh`
+
+### Caching Architecture
+
+Factory VM uses a multi-tier caching strategy for fast reinstalls:
+
+| Cache Location | Purpose | Preserved? |
+|---------------|---------|------------|
+| `~/.factory-vm/cache/` | Host-side downloads (Alpine ISO, kubectl, helm, terraform) | ✅ Yes |
+| `factory-cache.qcow2` (vdb) | Docker images in VM | ✅ Yes |
+| `factory-data.qcow2` (vdc) | Jenkins workspaces | ✅ Yes |
+
+After first install, subsequent reinstalls reuse cached downloads and Docker images, reducing installation time significantly.
+
 ## 📖 Documentation
 
 Comprehensive guides are available:
@@ -149,6 +166,29 @@ Simplest way to manage the VM:
 ~/vms/factory/stop-factory.sh     # Stop the VM
 ~/vms/factory/status-factory.sh   # Check VM status
 ```
+
+### Utility Scripts
+
+After installation, these utility scripts are available in `~/vms/factory/`:
+
+```bash
+# Expand the data disk (for more Jenkins workspace storage)
+./expand-data-disk.sh 100         # Expand to 100GB
+
+# Install Ansible (with AWS modules) - ~1.5GB download, cached
+./install-ansible.sh
+
+# Install Android SDK and Gradle - ~250MB download, cached
+./install-android-sdk.sh
+
+# Update cached tools and Docker images
+./refresh-cache.sh                # Update everything
+./refresh-cache.sh --check        # Dry run, show what would update
+./refresh-cache.sh --tools        # Only update CLI tools
+./refresh-cache.sh --docker       # Only update Docker images
+```
+
+All downloads are cached in `~/.factory-vm/cache/` for faster reinstalls.
 
 ### SSH Access
 
@@ -218,8 +258,8 @@ See [JENKINS-CLI.md](./docs/JENKINS-CLI.md) for:
 Factory VM uses a modular architecture for maintainability:
 
 - **Core**: 477-line orchestrator script
-- **Modules**: 15 specialized modules (1,925 lines total)
-- **Distribution**: Modules packaged in `lib/modules.ar` archive (71KB)
+- **Modules**: 19 specialized modules (2,400+ lines total)
+- **Distribution**: Modules packaged in `lib/modules.ar` archive (112KB)
 - **Code Reduction**: 91.6% reduction from original monolithic script
 
 This modular approach provides:
@@ -229,13 +269,14 @@ This modular approach provides:
 - ✅ Faster development cycles
 
 ### VM Configuration
-- **OS**: Alpine Linux 3.19 ARM64
+- **OS**: Alpine Linux 3.22 ARM64
 - **Hostname**: factory.local
 - **User**: foreman (with sudo)
 - **RAM**: 8GB
 - **CPUs**: 6 cores
-- **System Disk**: 50GB
-- **Data Disk**: 200GB
+- **System Disk**: 50GB (vda)
+- **Cache Disk**: 2GB (vdb) - Docker images, preserved across reinstalls
+- **Data Disk**: 20GB (vdc) - Jenkins workspaces
 - **SSH Port**: 2222 → 22
 - **HTTPS Port**: 443 → 443
 
@@ -489,7 +530,7 @@ factory-vm/ (repository)
 ├── tools/
 │   ├── setup-factory-vm.sh        # Main installation script (orchestrator)
 │   └── lib/
-│       └── modules.ar             # Archived modules (15 modules, 71KB)
+│       └── modules.ar             # Archived modules (19 modules, 112KB)
 ├── README.md                      # This file
 └── docs/
     ├── CHANGELOG.md               # Version history
@@ -497,24 +538,30 @@ factory-vm/ (repository)
     ├── JENKINS-CLI.md             # Jenkins CLI guide
     └── JENKINS-CLI-IMPLEMENTATION.md  # Technical details
 
-~/factory-vm/ (local installation cache)
-├── cache/                         # Cached downloads (preserved between installs)
-    ├── alpine/                    # Alpine ISO
-    ├── terraform/                 # Terraform binaries
-    ├── kubectl/                   # kubectl binaries
-    ├── helm/                      # Helm archives
-    ├── awscli/                    # AWS CLI installer
-    ├── ansible/                   # Ansible requirements
-    └── jenkins/                   # Jenkins Docker image
+~/.factory-vm/ (persistent config and cache)
+├── cache/                         # Host-side cached downloads
+│   ├── alpine/                    # Alpine ISO
+│   ├── terraform/                 # Terraform binaries
+│   ├── kubectl/                   # kubectl binaries
+│   ├── helm/                      # Helm archives
+│   ├── ansible/                   # Ansible pip packages (~1.5GB)
+│   └── android/                   # Android SDK & Gradle (~250MB)
+├── cache-backup.qcow2             # Cache disk backup (preserved by clean-for-test)
+└── credentials.txt                # Jenkins credentials backup
 
 ~/vms/factory/ (VM directory)
-├── factory.qcow2                  # System disk (50GB)
-├── factory-data.qcow2             # Data disk (200GB)
+├── factory.qcow2                  # System disk (50GB, vda)
+├── factory-cache.qcow2            # Cache disk (2GB, vdb) - Docker images
+├── factory-data.qcow2             # Data disk (20GB, vdc) - Jenkins workspaces
 ├── factory.pid                    # VM process ID
 ├── start-factory.sh               # Start VM script
 ├── stop-factory.sh                # Stop VM script
 ├── status-factory.sh              # Status check script
 ├── credentials.txt                # Jenkins & VM passwords
+├── expand-data-disk.sh            # Utility: expand data disk
+├── install-ansible.sh             # Utility: install Ansible
+├── install-android-sdk.sh         # Utility: install Android SDK
+├── refresh-cache.sh               # Utility: update tools/images
 └── README.md                      # VM documentation
 
 ~/.ssh/
@@ -562,6 +609,6 @@ For issues or questions:
 
 **Factory VM** - Professional ARM64 CI/CD environment for modern DevOps workflows.
 
-Version 2.0.0 (Phase 3.5 - Modular Architecture) - Last updated: 2025-11-25
+Version 3.0.0 (Phase 3 - Disk Separation & Utility Scripts) - Last updated: 2025-12-03
 
 
