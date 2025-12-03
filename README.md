@@ -302,7 +302,7 @@ localhost:2222 ─────────────────> SSH :22
 ## 🔒 Security
 
 ### Users and Credentials
-![Foreman](Foreman.png)
+![Foreman](docs/Foreman.png)
 **Jenkins Web UI & CLI**:
 - Username: `foreman`
 - Password: Auto-generated during installation

@@ -2,6 +2,52 @@
 
 All notable changes to the Factory VM project are documented in this file.
 
+## [3.0.0] - 2025-12-03 (Phase 3: Disk Separation & Utility Scripts)
+
+### 🚀 Added
+
+**Three-Disk Architecture**
+- **System Disk** (vda, 50GB): Alpine OS and installed packages
+- **Cache Disk** (vdb, 2GB): Docker images, preserved across reinstalls
+- **Data Disk** (vdc, 20GB): Jenkins workspaces, expandable
+
+**Utility Scripts**
+- `expand-data-disk.sh`: Expand data disk from 20GB up to 2TB
+- `install-ansible.sh`: Install Ansible with AWS modules (~1.5GB, cached)
+- `install-android-sdk.sh`: Install Android SDK with Gradle (~250MB, cached)
+- `refresh-cache.sh`: Update tools and Docker images without full reinstall
+
+**Dynamic Version Detection**
+- All tools (kubectl, helm, terraform, gradle, Android SDK) now fetch latest versions
+- No more hardcoded versions in scripts
+- Cache files include version in filename for easy upgrades
+
+**Host-Side Caching Improvements**
+- All downloads cached in `~/.factory-vm/cache/`
+- Cache disk backed up to `~/.factory-vm/cache-backup.qcow2`
+- Subsequent installs reuse cached downloads (significant time savings)
+
+### 📝 Changes
+
+**Module Count**: 19 modules (was 15), 112KB (was 71KB)
+- Added: `expand-data-disk.sh`, `install-ansible.sh`, `install-android-sdk.sh`, `refresh-cache.sh`
+
+**Alpine Version**: Updated to 3.22 (was 3.19)
+
+**Data Disk Size**: Changed from 200GB to 20GB default (expandable via script)
+
+### 🔧 Technical Details
+
+**Cache Disk Mount Point**: `/var/cache/factory-build`
+- Docker data-root configured here
+- Docker images persist across system disk rebuilds
+
+**Data Disk Mount Point**: `/var/lib/jenkins`
+- Jenkins workspaces persist here
+- Expandable without rebuilding VM
+
+---
+
 ## [2.1.0] - 2025-11-21 (Host-Side Caching Architecture)
 
 ### 🚀 Added
