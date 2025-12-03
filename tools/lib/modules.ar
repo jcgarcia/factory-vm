@@ -2609,13 +2609,15 @@ main() {
 }
 
 main "$@"
-/228            0           0     0     644     2372      `
+/228            0           0     0     644     3234      `
 #!/bin/bash
 ################################################################################
 # Install Android SDK on Factory VM
 #
 # This script installs Android SDK, build tools, and Gradle for mobile builds
 # Run this on your host machine, it will SSH into the VM to install.
+#
+# Downloads are cached in ~/.factory-vm/cache/android/ for faster reinstalls.
 #
 # Usage:
 #   ./install-android-sdk.sh
@@ -2624,30 +2626,57 @@ main "$@"
 
 set -e
 
+# Configuration
+CACHE_DIR="${HOME}/.factory-vm/cache/android"
+ANDROID_SDK_VERSION="11076708"
+GRADLE_VERSION="8.5"
+ANDROID_SDK_FILE="commandlinetools-linux-${ANDROID_SDK_VERSION}_latest.zip"
+GRADLE_FILE="gradle-${GRADLE_VERSION}-bin.zip"
+
 echo "Installing Android SDK on Factory VM..."
 echo ""
 
-# Download and install Android SDK
+# Create cache directory
+mkdir -p "$CACHE_DIR"
+
+# Download Android SDK to cache if not present
+if [ ! -f "$CACHE_DIR/$ANDROID_SDK_FILE" ]; then
+    echo "→ Downloading Android SDK Command Line Tools to cache..."
+    curl -fsSL "https://dl.google.com/android/repository/$ANDROID_SDK_FILE" -o "$CACHE_DIR/$ANDROID_SDK_FILE"
+    echo "✓ Android SDK cached"
+else
+    echo "→ Using cached Android SDK"
+fi
+
+# Download Gradle to cache if not present
+if [ ! -f "$CACHE_DIR/$GRADLE_FILE" ]; then
+    echo "→ Downloading Gradle ${GRADLE_VERSION} to cache..."
+    curl -fsSL "https://services.gradle.org/distributions/$GRADLE_FILE" -o "$CACHE_DIR/$GRADLE_FILE"
+    echo "✓ Gradle cached"
+else
+    echo "→ Using cached Gradle"
+fi
+
+echo "→ Copying files to VM..."
+scp "$CACHE_DIR/$ANDROID_SDK_FILE" factory:/tmp/android-sdk.zip
+scp "$CACHE_DIR/$GRADLE_FILE" factory:/tmp/gradle.zip
+
+# Install on VM
 ssh factory << 'REMOTE_INSTALL'
 set -e
 
-ANDROID_SDK_VERSION="11076708"
-ANDROID_SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_SDK_VERSION}_latest.zip"
 ANDROID_HOME="/opt/android-sdk"
 
-echo "Downloading Android SDK Command Line Tools..."
+echo "→ Extracting Android SDK..."
 sudo mkdir -p ${ANDROID_HOME}/cmdline-tools
 cd /tmp
-wget -q ${ANDROID_SDK_URL} -O android-sdk.zip
-
-echo "Extracting Android SDK..."
 sudo unzip -q android-sdk.zip -d ${ANDROID_HOME}/cmdline-tools
 sudo mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest
 rm android-sdk.zip
 
 # Set environment variables
-echo "Configuring environment..."
-sudo tee -a /etc/profile.d/android-sdk.sh > /dev/null << 'PROFILE'
+echo "→ Configuring environment..."
+sudo tee /etc/profile.d/android-sdk.sh > /dev/null << 'PROFILE'
 export ANDROID_HOME=/opt/android-sdk
 export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
 export PATH=$PATH:$ANDROID_HOME/platform-tools
@@ -2657,24 +2686,23 @@ PROFILE
 source /etc/profile.d/android-sdk.sh
 
 # Accept licenses and install essentials
-echo "Installing Android SDK packages..."
-yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses || true
+echo "→ Installing Android SDK packages..."
+yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
 # Install Gradle
-echo "Installing Gradle..."
-GRADLE_VERSION="8.5"
+echo "→ Installing Gradle..."
 cd /tmp
-wget -q https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip
-sudo unzip -q gradle-${GRADLE_VERSION}-bin.zip -d /opt
-sudo ln -sf /opt/gradle-${GRADLE_VERSION}/bin/gradle /usr/local/bin/gradle
-rm gradle-${GRADLE_VERSION}-bin.zip
+sudo unzip -q gradle.zip -d /opt
+sudo ln -sf /opt/gradle-*/bin/gradle /usr/local/bin/gradle
+rm gradle.zip
 
 echo "✓ Android SDK installation complete"
 REMOTE_INSTALL
 
 echo ""
 echo "✓ Android SDK and Gradle installed successfully!"
+echo "✓ Downloads cached at ~/.factory-vm/cache/android/"
 echo ""
 echo "Verify installation:"
 echo "  ssh factory 'echo \$ANDROID_HOME'"
@@ -2682,13 +2710,15 @@ echo "  ssh factory 'gradle --version'"
 echo ""
 echo "Environment variables set in /etc/profile.d/android-sdk.sh"
 echo ""
-/252            0           0     0     644     926       `
+/252            0           0     0     644     2690      `
 #!/bin/bash
 ################################################################################
 # Install Ansible on Factory VM
 #
 # This script installs Ansible and its AWS dependencies (boto3, botocore)
 # Run this on your host machine, it will SSH into the VM to install.
+#
+# Downloads are cached in ~/.factory-vm/cache/ansible/ for faster reinstalls.
 #
 # Usage:
 #   ./install-ansible.sh
@@ -2697,20 +2727,61 @@ echo ""
 
 set -e
 
+# Configuration
+CACHE_DIR="${HOME}/.factory-vm/cache/ansible"
+ANSIBLE_VERSION="12.2.0"  # Major version for caching
+REQUIREMENTS_FILE="requirements-ansible.txt"
+
 echo "Installing Ansible on Factory VM..."
 echo ""
 
-if ! ssh factory 'command -v pip3 >/dev/null 2>&1'; then
-    echo "Error: Python3 pip not found in VM"
-    exit 1
+# Create cache directory
+mkdir -p "$CACHE_DIR"
+
+# Check if we have cached pip packages
+if [ -d "$CACHE_DIR/pip-cache" ] && [ "$(ls -A $CACHE_DIR/pip-cache 2>/dev/null)" ]; then
+    echo "→ Using cached Ansible packages from ~/.factory-vm/cache/ansible/"
+    CACHE_EXISTS=1
+else
+    echo "→ First time install - will download and cache packages"
+    CACHE_EXISTS=0
 fi
 
-echo "Installing Ansible and AWS dependencies..."
-ssh factory 'sudo apk add --no-cache py3-pip python3-dev build-base libffi-dev openssl-dev'
-ssh factory 'sudo pip3 install --break-system-packages ansible boto3 botocore'
+# Ensure pip and build deps are installed
+echo "→ Installing build dependencies..."
+ssh factory 'sudo apk add --no-cache py3-pip python3-dev build-base libffi-dev openssl-dev' 2>/dev/null
+
+if [ "$CACHE_EXISTS" -eq 1 ]; then
+    # Copy cached packages to VM and install from cache
+    echo "→ Copying cached packages to VM..."
+    scp -r "$CACHE_DIR/pip-cache" factory:/tmp/
+    
+    echo "→ Installing from cache..."
+    ssh factory 'sudo pip3 install --break-system-packages --no-index --find-links=/tmp/pip-cache ansible boto3 botocore'
+    ssh factory 'rm -rf /tmp/pip-cache'
+else
+    # Download packages to cache first, then install
+    echo "→ Downloading packages to cache..."
+    
+    # Download packages on host (pip download works cross-platform for pure Python packages)
+    # But for compiled packages we need to download on the target architecture
+    # So we download on the VM and copy back to host cache
+    
+    ssh factory 'mkdir -p /tmp/pip-download'
+    ssh factory 'pip3 download --dest /tmp/pip-download ansible boto3 botocore'
+    
+    echo "→ Caching packages for future installs..."
+    mkdir -p "$CACHE_DIR/pip-cache"
+    scp -r factory:/tmp/pip-download/* "$CACHE_DIR/pip-cache/"
+    
+    echo "→ Installing packages..."
+    ssh factory 'sudo pip3 install --break-system-packages --no-index --find-links=/tmp/pip-download ansible boto3 botocore'
+    ssh factory 'rm -rf /tmp/pip-download'
+fi
 
 echo ""
 echo "✓ Ansible installed successfully!"
+echo "✓ Packages cached at ~/.factory-vm/cache/ansible/"
 echo ""
 echo "Verify installation:"
 echo "  ssh factory 'ansible --version'"
