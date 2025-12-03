@@ -2609,7 +2609,7 @@ main() {
 }
 
 main "$@"
-/228            0           0     0     644     3234      `
+/228            0           0     0     644     5104      `
 #!/bin/bash
 ################################################################################
 # Install Android SDK on Factory VM
@@ -2628,13 +2628,44 @@ set -e
 
 # Configuration
 CACHE_DIR="${HOME}/.factory-vm/cache/android"
-ANDROID_SDK_VERSION="11076708"
-GRADLE_VERSION="8.5"
-ANDROID_SDK_FILE="commandlinetools-linux-${ANDROID_SDK_VERSION}_latest.zip"
-GRADLE_FILE="gradle-${GRADLE_VERSION}-bin.zip"
 
 echo "Installing Android SDK on Factory VM..."
 echo ""
+
+# Get latest Android SDK version from Google's repository
+echo "→ Checking for latest Android SDK version..."
+ANDROID_SDK_FILE=$(curl -sL "https://dl.google.com/android/repository/repository2-3.xml" | \
+    grep -oE 'commandlinetools-linux-[0-9]+_latest\.zip' | sort -t'-' -k3 -n | tail -1)
+if [ -z "$ANDROID_SDK_FILE" ]; then
+    echo "✗ Could not determine latest Android SDK version"
+    exit 1
+fi
+ANDROID_SDK_VERSION=$(echo "$ANDROID_SDK_FILE" | grep -oE '[0-9]+')
+echo "  Latest Android SDK: $ANDROID_SDK_VERSION"
+
+# Get latest Gradle version from Gradle's API
+echo "→ Checking for latest Gradle version..."
+GRADLE_VERSION=$(curl -sL "https://services.gradle.org/versions/current" | grep -oE '"version" *: *"[^"]+"' | cut -d'"' -f4)
+if [ -z "$GRADLE_VERSION" ]; then
+    echo "✗ Could not determine latest Gradle version"
+    exit 1
+fi
+GRADLE_FILE="gradle-${GRADLE_VERSION}-bin.zip"
+echo "  Latest Gradle: $GRADLE_VERSION"
+echo ""
+
+# Check if Android SDK is fully installed (cmdline-tools + platform-tools + build-tools)
+if ssh factory 'test -d /opt/android-sdk/platform-tools && test -d /opt/android-sdk/build-tools/34.0.0' 2>/dev/null; then
+    echo "✓ Android SDK already fully installed in VM"
+    echo ""
+    echo "To reinstall, first remove it:"
+    echo "  ssh factory 'sudo rm -rf /opt/android-sdk'"
+    echo ""
+    echo "Verify installation:"
+    echo "  ssh factory 'source /etc/profile.d/android-sdk.sh && sdkmanager --version'"
+    echo "  ssh factory 'gradle --version'"
+    exit 0
+fi
 
 # Create cache directory
 mkdir -p "$CACHE_DIR"
@@ -2657,21 +2688,25 @@ else
     echo "→ Using cached Gradle"
 fi
 
-echo "→ Copying files to VM..."
-scp "$CACHE_DIR/$ANDROID_SDK_FILE" factory:/tmp/android-sdk.zip
-scp "$CACHE_DIR/$GRADLE_FILE" factory:/tmp/gradle.zip
+# Check if cmdline-tools already extracted (partial install from before)
+if ssh factory 'test -d /opt/android-sdk/cmdline-tools/latest' 2>/dev/null; then
+    echo "→ Android SDK cmdline-tools already extracted, skipping copy"
+else
+    echo "→ Copying files to VM..."
+    scp "$CACHE_DIR/$ANDROID_SDK_FILE" factory:/tmp/android-sdk.zip
+    scp "$CACHE_DIR/$GRADLE_FILE" factory:/tmp/gradle.zip
 
-# Install on VM
-ssh factory << 'REMOTE_INSTALL'
+    # Extract and configure on VM
+    ssh factory << 'REMOTE_INSTALL'
 set -e
-
 ANDROID_HOME="/opt/android-sdk"
 
 echo "→ Extracting Android SDK..."
-sudo mkdir -p ${ANDROID_HOME}/cmdline-tools
+sudo mkdir -p ${ANDROID_HOME}
+sudo chown -R $(whoami):$(whoami) ${ANDROID_HOME}
 cd /tmp
-sudo unzip -q android-sdk.zip -d ${ANDROID_HOME}/cmdline-tools
-sudo mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest
+unzip -q android-sdk.zip -d ${ANDROID_HOME}/cmdline-tools
+mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest
 rm android-sdk.zip
 
 # Set environment variables
@@ -2683,22 +2718,27 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 export PATH=$PATH:$ANDROID_HOME/build-tools/34.0.0
 PROFILE
 
-source /etc/profile.d/android-sdk.sh
-
-# Accept licenses and install essentials
-echo "→ Installing Android SDK packages..."
-yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-
 # Install Gradle
 echo "→ Installing Gradle..."
 cd /tmp
 sudo unzip -q gradle.zip -d /opt
+sudo chown -R $(whoami):$(whoami) /opt/gradle-*
 sudo ln -sf /opt/gradle-*/bin/gradle /usr/local/bin/gradle
 rm gradle.zip
-
-echo "✓ Android SDK installation complete"
 REMOTE_INSTALL
+fi
+
+# Fix ownership if needed (for partial installs)
+echo "→ Fixing ownership..."
+ssh factory 'sudo chown -R $(whoami):$(whoami) /opt/android-sdk'
+
+# Accept licenses - must be done outside heredoc for yes pipe to work
+echo "→ Accepting Android SDK licenses..."
+ssh factory 'yes | /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses' > /dev/null 2>&1 || true
+
+# Install SDK packages
+echo "→ Installing Android SDK packages..."
+ssh factory 'source /etc/profile.d/android-sdk.sh && sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"'
 
 echo ""
 echo "✓ Android SDK and Gradle installed successfully!"
@@ -2710,7 +2750,7 @@ echo "  ssh factory 'gradle --version'"
 echo ""
 echo "Environment variables set in /etc/profile.d/android-sdk.sh"
 echo ""
-/252            0           0     0     644     2690      `
+/252            0           0     0     644     2955      `
 #!/bin/bash
 ################################################################################
 # Install Ansible on Factory VM
@@ -2729,11 +2769,20 @@ set -e
 
 # Configuration
 CACHE_DIR="${HOME}/.factory-vm/cache/ansible"
-ANSIBLE_VERSION="12.2.0"  # Major version for caching
-REQUIREMENTS_FILE="requirements-ansible.txt"
 
 echo "Installing Ansible on Factory VM..."
 echo ""
+
+# Check if Ansible is already installed in VM
+if ssh factory 'command -v ansible >/dev/null 2>&1'; then
+    echo "✓ Ansible already installed in VM"
+    ssh factory 'ansible --version | head -1'
+    echo ""
+    echo "To reinstall, first remove it:"
+    echo "  ssh factory 'sudo pip3 uninstall -y ansible ansible-core boto3 botocore'"
+    echo ""
+    exit 0
+fi
 
 # Create cache directory
 mkdir -p "$CACHE_DIR"
@@ -2786,3 +2835,4 @@ echo ""
 echo "Verify installation:"
 echo "  ssh factory 'ansible --version'"
 echo ""
+
