@@ -1374,7 +1374,7 @@ install_certificates_on_host() {
 
 # Export functions
 export -f install_certificates_on_host
-/122            0           0     0     644     1892      `
+/122            0           0     0     644     2150      `
 #!/bin/bash
 # install-docker.sh - Install Docker on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -1402,6 +1402,15 @@ sudo service docker start
 # Add foreman to docker group (if not already done)
 sudo addgroup foreman docker 2>/dev/null || true
 
+# Wait for Docker to be ready (socket must exist before we can chmod it)
+echo "Waiting for Docker socket..."
+for i in {1..15}; do
+    if [ -S /var/run/docker.sock ] && sudo docker version >/dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+done
+
 # Make Docker socket accessible to containers (for Jenkins Docker Cloud agent)
 # The Jenkins container runs as uid 1000, which isn't in the host's docker group
 # This allows containers to communicate with the Docker daemon
@@ -1411,18 +1420,17 @@ sudo chmod 666 /var/run/docker.sock
 sudo tee /etc/local.d/docker-socket.start > /dev/null << 'STARTUP'
 #!/bin/sh
 # Make Docker socket accessible to containers (Jenkins Docker Cloud agent)
-chmod 666 /var/run/docker.sock
-STARTUP
-sudo chmod +x /etc/local.d/docker-socket.start
-sudo rc-update add local default 2>/dev/null || true
-
-# Wait for Docker to be ready
-for i in {1..10}; do
-    if sudo docker version >/dev/null 2>&1; then
+# Wait for socket to exist
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    if [ -S /var/run/docker.sock ]; then
+        chmod 666 /var/run/docker.sock
         break
     fi
     sleep 2
 done
+STARTUP
+sudo chmod +x /etc/local.d/docker-socket.start
+sudo rc-update add local default 2>/dev/null || true
 
 echo "Docker version:"
 sudo docker version
