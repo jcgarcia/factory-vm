@@ -412,7 +412,7 @@ export -f download_and_cache_jenkins_image
 export -f cache_all_tools
 export -f download_and_cache_plugin
 export -f cache_all_plugins
-/18             0           0     0     644     12452     `
+/18             0           0     0     644     10461     `
 #!/bin/bash
 # install-jenkins.sh - Install Jenkins on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -584,71 +584,31 @@ user.save()
 instance.save()
 GROOVY_USER
 
-# Create Docker Cloud agent configuration
-sudo tee /opt/jenkins/init.groovy.d/07-configure-docker-agent.groovy > /dev/null << 'GROOVY_AGENT'
-#!groovy
-import jenkins.model.Jenkins
-import com.nirima.jenkins.plugins.docker.DockerCloud
-import com.nirima.jenkins.plugins.docker.DockerTemplate
-import com.nirima.jenkins.plugins.docker.DockerTemplateBase
-import io.jenkins.docker.connector.DockerComputerAttachConnector
-import io.jenkins.docker.client.DockerAPI
-import org.jenkinsci.plugins.docker.commons.credentials.DockerServerEndpoint
+# Note: Docker Cloud agent is configured via JCasC (jenkins.yaml) below
+# Groovy init scripts run BEFORE plugins load, so we can't reference plugin classes here
+# JCasC is applied AFTER plugins load - this is the correct approach
 
-def instance = Jenkins.getInstance()
+# Create JCasC configuration for Docker Cloud agent
+sudo tee /opt/jenkins/jenkins.yaml > /dev/null << 'CASC_CONFIG'
+jenkins:
+  clouds:
+    - docker:
+        name: "docker"
+        dockerApi:
+          dockerHost:
+            uri: "unix:///var/run/docker.sock"
+        templates:
+          - labelString: "docker-agent linux arm64"
+            dockerTemplateBase:
+              image: "jenkins/inbound-agent:latest"
+            remoteFs: "/home/jenkins/agent"
+            instanceCapStr: "10"
+            connector:
+              attach:
+                user: "jenkins"
+CASC_CONFIG
 
-try {
-    println '--> Configuring Docker cloud for build agents...'
-    
-    // Check if Docker plugin is available
-    def dockerPluginClass = Class.forName('com.nirima.jenkins.plugins.docker.DockerCloud')
-    
-    // Create Docker cloud if it doesn't exist
-    def existingCloud = instance.clouds.find { it.name == 'docker' }
-    if (existingCloud == null) {
-        // Docker template for ARM64 builds
-        def dockerTemplateBase = new DockerTemplateBase('jenkins/inbound-agent:latest')
-        dockerTemplateBase.setDockerCommand('')
-        dockerTemplateBase.setVolumesString('')
-        dockerTemplateBase.setEnvironmentsString('')
-        
-        def dockerTemplate = new DockerTemplate(
-            dockerTemplateBase,
-            new DockerComputerAttachConnector(),
-            'docker linux arm64',  // Labels
-            '/home/jenkins/agent', // Remote FS root
-            '2'                    // Instance capacity
-        )
-        dockerTemplate.setMode(hudson.model.Node.Mode.NORMAL)
-        dockerTemplate.setRemoveVolumes(true)
-        
-        // Create DockerAPI with local socket connection (new API)
-        def dockerServerEndpoint = new DockerServerEndpoint('unix:///var/run/docker.sock', null)
-        def dockerApi = new DockerAPI(dockerServerEndpoint)
-        
-        // Create DockerCloud with new constructor: (name, dockerApi, templates)
-        def dockerCloud = new DockerCloud('docker', dockerApi, [dockerTemplate])
-        dockerCloud.setContainerCap(100)
-        
-        instance.clouds.add(dockerCloud)
-        instance.save()
-        
-        println "    Docker cloud configured successfully"
-        println "    - Image: jenkins/inbound-agent:latest"
-        println "    - Labels: docker linux arm64"
-        println "    - Executors: 2 per container"
-    } else {
-        println "    Docker cloud already exists"
-    }
-} catch (ClassNotFoundException e) {
-    println "    WARNING: Docker plugin not installed yet - agent setup skipped"
-    println "    This is normal on first install - plugins install after init scripts run"
-    println "    Run: jenkins-factory restart to apply after plugins install"
-} catch (Exception e) {
-    println "    WARNING: Error configuring Docker agent: ${e.message}"
-    println "    You can configure agents manually: Manage Jenkins > Clouds > New Cloud"
-}
-GROOVY_AGENT
+echo "  ✓ JCasC configuration created for Docker Cloud agent"
 
 # Set ownership
 sudo chown -R 1000:1000 /opt/jenkins
@@ -730,6 +690,7 @@ sudo docker run -d --name jenkins \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e JAVA_OPTS="-Djenkins.install.runSetupWizard=false -Xmx2g" \
     -e JENKINS_FOREMAN_PASSWORD="${JENKINS_FOREMAN_PASSWORD}" \
+    -e CASC_JENKINS_CONFIG="/var/jenkins_home/jenkins.yaml" \
     jenkins/jenkins:lts-jdk21
 
 echo "✓ Jenkins container started"
@@ -747,6 +708,7 @@ EOF
 
 # Export functions
 export -f install_jenkins_via_ssh
+
 common.sh/      0           0     0     644     5464      `
 #!/bin/bash
 # common.sh - Shared utilities for Factory VM setup
