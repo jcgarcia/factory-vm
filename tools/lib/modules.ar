@@ -1,5 +1,5 @@
 !<arch>
-//                                              272       `
+//                                              290       `
 cache-manager.sh/
 install-jenkins.sh/
 configure-jenkins.sh/
@@ -13,6 +13,7 @@ install-terraform.sh/
 expand-data-disk.sh/
 install-android-sdk.sh/
 install-ansible.sh/
+refresh-cache.sh/
 /0              0           0     0     644     12598     `
 #!/bin/bash
 # cache-manager.sh - Download and cache tools for Factory VM
@@ -2836,3 +2837,315 @@ echo "Verify installation:"
 echo "  ssh factory 'ansible --version'"
 echo ""
 
+/272            0           0     0     644     11784     `
+#!/bin/bash
+################################################################################
+# Refresh Cache - Update cached tools and Docker images
+#
+# This script updates tools to their latest versions and pulls fresh Docker images.
+# Run this on your host machine, it will SSH into the VM to update.
+#
+# Usage:
+#   ./refresh-cache.sh           # Update everything
+#   ./refresh-cache.sh --tools   # Only update CLI tools
+#   ./refresh-cache.sh --docker  # Only update Docker images
+#   ./refresh-cache.sh --check   # Just show what would be updated
+#
+################################################################################
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Configuration
+CACHE_DIR="${HOME}/.factory-vm/cache"
+
+# Parse arguments
+UPDATE_TOOLS=true
+UPDATE_DOCKER=true
+CHECK_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --tools)
+            UPDATE_DOCKER=false
+            shift
+            ;;
+        --docker)
+            UPDATE_TOOLS=false
+            shift
+            ;;
+        --check)
+            CHECK_ONLY=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [options]"
+            echo ""
+            echo "Options:"
+            echo "  --tools   Only update CLI tools (kubectl, helm, terraform, awscli)"
+            echo "  --docker  Only update Docker images"
+            echo "  --check   Just show what would be updated (dry run)"
+            echo "  -h        Show this help"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+################################################################################
+# Version Detection Functions
+################################################################################
+
+get_latest_terraform_version() {
+    curl -sL https://api.github.com/repos/hashicorp/terraform/releases/latest 2>/dev/null | \
+        grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/'
+}
+
+get_latest_kubectl_version() {
+    curl -sL https://dl.k8s.io/release/stable.txt 2>/dev/null | sed 's/^v//'
+}
+
+get_latest_helm_version() {
+    curl -sL https://api.github.com/repos/helm/helm/releases/latest 2>/dev/null | \
+        grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/'
+}
+
+get_latest_awscli_version() {
+    # Alpine packages aws-cli separately, check Alpine package version
+    # We can't easily get the latest Alpine package version remotely,
+    # so we just return empty to skip comparison and always offer update
+    echo ""
+}
+
+get_installed_version() {
+    local tool="$1"
+    case "$tool" in
+        kubectl)
+            ssh factory 'kubectl version --client 2>/dev/null' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/^v//'
+            ;;
+        helm)
+            ssh factory 'helm version --short 2>/dev/null' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/^v//'
+            ;;
+        terraform)
+            ssh factory 'terraform version 2>/dev/null' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+            ;;
+        *)
+            ssh factory "$tool --version 2>/dev/null" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+            ;;
+    esac
+}
+
+################################################################################
+# Main Logic
+################################################################################
+
+echo ""
+echo -e "${BLUE}╔══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║  Factory VM - Cache Refresh                              ║${NC}"
+echo -e "${BLUE}╚══════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# Check VM is running
+if ! ssh factory 'echo "VM connected"' &>/dev/null; then
+    echo -e "${RED}✗ Cannot connect to Factory VM${NC}"
+    echo "  Make sure the VM is running: cd ~/vms/factory && ./start.sh"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Connected to Factory VM${NC}"
+echo ""
+
+################################################################################
+# Check/Update CLI Tools
+################################################################################
+
+if [ "$UPDATE_TOOLS" = true ]; then
+    echo -e "${YELLOW}Checking CLI tools...${NC}"
+    echo ""
+    
+    # Detect architecture
+    ARCH=$(ssh factory 'uname -m')
+    if [ "$ARCH" = "aarch64" ]; then
+        ARCH_SUFFIX="arm64"
+    else
+        ARCH_SUFFIX="amd64"
+    fi
+    
+    # kubectl
+    echo -n "  kubectl:    "
+    KUBECTL_INSTALLED=$(get_installed_version kubectl)
+    KUBECTL_LATEST=$(get_latest_kubectl_version)
+    if [ -z "$KUBECTL_INSTALLED" ]; then
+        echo -e "${YELLOW}not installed${NC} → ${GREEN}${KUBECTL_LATEST}${NC}"
+        KUBECTL_NEEDS_UPDATE=true
+    elif [ "$KUBECTL_INSTALLED" != "$KUBECTL_LATEST" ]; then
+        echo -e "${YELLOW}${KUBECTL_INSTALLED}${NC} → ${GREEN}${KUBECTL_LATEST}${NC}"
+        KUBECTL_NEEDS_UPDATE=true
+    else
+        echo -e "${GREEN}${KUBECTL_INSTALLED}${NC} (latest)"
+        KUBECTL_NEEDS_UPDATE=false
+    fi
+    
+    # helm
+    echo -n "  helm:       "
+    HELM_INSTALLED=$(get_installed_version helm)
+    HELM_LATEST=$(get_latest_helm_version)
+    if [ -z "$HELM_INSTALLED" ]; then
+        echo -e "${YELLOW}not installed${NC} → ${GREEN}${HELM_LATEST}${NC}"
+        HELM_NEEDS_UPDATE=true
+    elif [ "$HELM_INSTALLED" != "$HELM_LATEST" ]; then
+        echo -e "${YELLOW}${HELM_INSTALLED}${NC} → ${GREEN}${HELM_LATEST}${NC}"
+        HELM_NEEDS_UPDATE=true
+    else
+        echo -e "${GREEN}${HELM_INSTALLED}${NC} (latest)"
+        HELM_NEEDS_UPDATE=false
+    fi
+    
+    # terraform
+    echo -n "  terraform:  "
+    TERRAFORM_INSTALLED=$(get_installed_version terraform)
+    TERRAFORM_LATEST=$(get_latest_terraform_version)
+    if [ -z "$TERRAFORM_INSTALLED" ]; then
+        echo -e "${YELLOW}not installed${NC} → ${GREEN}${TERRAFORM_LATEST}${NC}"
+        TERRAFORM_NEEDS_UPDATE=true
+    elif [ "$TERRAFORM_INSTALLED" != "$TERRAFORM_LATEST" ]; then
+        echo -e "${YELLOW}${TERRAFORM_INSTALLED}${NC} → ${GREEN}${TERRAFORM_LATEST}${NC}"
+        TERRAFORM_NEEDS_UPDATE=true
+    else
+        echo -e "${GREEN}${TERRAFORM_INSTALLED}${NC} (latest)"
+        TERRAFORM_NEEDS_UPDATE=false
+    fi
+    
+    # awscli (Alpine package)
+    echo -n "  aws-cli:    "
+    AWSCLI_INSTALLED=$(ssh factory 'aws --version 2>/dev/null' | grep -oE 'aws-cli/[0-9.]+' | cut -d/ -f2)
+    if [ -z "$AWSCLI_INSTALLED" ]; then
+        echo -e "${YELLOW}not installed${NC}"
+        AWSCLI_NEEDS_UPDATE=true
+    else
+        echo -e "${GREEN}${AWSCLI_INSTALLED}${NC} (use --tools to check for apk updates)"
+        AWSCLI_NEEDS_UPDATE=false
+    fi
+    
+    echo ""
+    
+    if [ "$CHECK_ONLY" = false ]; then
+        # Update kubectl
+        if [ "$KUBECTL_NEEDS_UPDATE" = true ] && [ -n "$KUBECTL_LATEST" ]; then
+            echo -e "→ Updating kubectl to ${KUBECTL_LATEST}..."
+            mkdir -p "$CACHE_DIR/kubectl"
+            curl -sLo "$CACHE_DIR/kubectl/kubectl_${KUBECTL_LATEST}" \
+                "https://dl.k8s.io/release/v${KUBECTL_LATEST}/bin/linux/${ARCH_SUFFIX}/kubectl"
+            scp "$CACHE_DIR/kubectl/kubectl_${KUBECTL_LATEST}" factory:/tmp/kubectl
+            ssh factory 'sudo mv /tmp/kubectl /usr/local/bin/kubectl && sudo chmod +x /usr/local/bin/kubectl'
+            echo -e "  ${GREEN}✓ kubectl updated${NC}"
+        fi
+        
+        # Update helm
+        if [ "$HELM_NEEDS_UPDATE" = true ] && [ -n "$HELM_LATEST" ]; then
+            echo -e "→ Updating helm to ${HELM_LATEST}..."
+            mkdir -p "$CACHE_DIR/helm"
+            curl -sLo "$CACHE_DIR/helm/helm-v${HELM_LATEST}-linux-${ARCH_SUFFIX}.tar.gz" \
+                "https://get.helm.sh/helm-v${HELM_LATEST}-linux-${ARCH_SUFFIX}.tar.gz"
+            scp "$CACHE_DIR/helm/helm-v${HELM_LATEST}-linux-${ARCH_SUFFIX}.tar.gz" factory:/tmp/helm.tar.gz
+            ssh factory 'cd /tmp && tar -zxf helm.tar.gz && sudo mv linux-*/helm /usr/local/bin/ && rm -rf linux-* helm.tar.gz'
+            echo -e "  ${GREEN}✓ helm updated${NC}"
+        fi
+        
+        # Update terraform
+        if [ "$TERRAFORM_NEEDS_UPDATE" = true ] && [ -n "$TERRAFORM_LATEST" ]; then
+            echo -e "→ Updating terraform to ${TERRAFORM_LATEST}..."
+            mkdir -p "$CACHE_DIR/terraform"
+            curl -sLo "$CACHE_DIR/terraform/terraform_${TERRAFORM_LATEST}_linux_${ARCH_SUFFIX}.zip" \
+                "https://releases.hashicorp.com/terraform/${TERRAFORM_LATEST}/terraform_${TERRAFORM_LATEST}_linux_${ARCH_SUFFIX}.zip"
+            scp "$CACHE_DIR/terraform/terraform_${TERRAFORM_LATEST}_linux_${ARCH_SUFFIX}.zip" factory:/tmp/terraform.zip
+            ssh factory 'cd /tmp && unzip -qo terraform.zip && sudo mv terraform /usr/local/bin/ && rm terraform.zip'
+            echo -e "  ${GREEN}✓ terraform updated${NC}"
+        fi
+        
+        # Update AWS CLI (Alpine uses apk package)
+        if [ "$AWSCLI_NEEDS_UPDATE" = true ]; then
+            echo -e "→ Updating aws-cli..."
+            ssh factory 'sudo apk update && sudo apk upgrade aws-cli'
+            echo -e "  ${GREEN}✓ aws-cli updated${NC}"
+        fi
+    fi
+fi
+
+################################################################################
+# Check/Update Docker Images
+################################################################################
+
+if [ "$UPDATE_DOCKER" = true ]; then
+    echo -e "${YELLOW}Checking Docker images...${NC}"
+    echo ""
+    
+    # Jenkins LTS
+    echo -n "  jenkins/jenkins:lts-jdk21    "
+    JENKINS_LOCAL=$(ssh factory 'docker images jenkins/jenkins:lts-jdk21 --format "{{.ID}}"' 2>/dev/null)
+    if [ -z "$JENKINS_LOCAL" ]; then
+        echo -e "${YELLOW}not pulled${NC}"
+        JENKINS_NEEDS_PULL=true
+    else
+        # Check if there's a newer version
+        if [ "$CHECK_ONLY" = false ]; then
+            JENKINS_NEEDS_PULL=true  # Always try to pull to check for updates
+        else
+            echo -e "${GREEN}${JENKINS_LOCAL:0:12}${NC} (checking...)"
+            JENKINS_NEEDS_PULL=true
+        fi
+    fi
+    
+    # Jenkins inbound agent
+    echo -n "  jenkins/inbound-agent:latest "
+    AGENT_LOCAL=$(ssh factory 'docker images jenkins/inbound-agent:latest --format "{{.ID}}"' 2>/dev/null)
+    if [ -z "$AGENT_LOCAL" ]; then
+        echo -e "${YELLOW}not pulled${NC}"
+        AGENT_NEEDS_PULL=true
+    else
+        if [ "$CHECK_ONLY" = false ]; then
+            AGENT_NEEDS_PULL=true
+        else
+            echo -e "${GREEN}${AGENT_LOCAL:0:12}${NC} (checking...)"
+            AGENT_NEEDS_PULL=true
+        fi
+    fi
+    
+    echo ""
+    
+    if [ "$CHECK_ONLY" = false ]; then
+        echo -e "→ Pulling latest Docker images..."
+        ssh factory 'docker pull jenkins/jenkins:lts-jdk21'
+        echo -e "  ${GREEN}✓ jenkins/jenkins:lts-jdk21 updated${NC}"
+        
+        ssh factory 'docker pull jenkins/inbound-agent:latest'
+        echo -e "  ${GREEN}✓ jenkins/inbound-agent:latest updated${NC}"
+        
+        # Clean up old unused images
+        echo ""
+        echo -e "→ Cleaning unused Docker images..."
+        ssh factory 'docker image prune -f' 2>/dev/null || true
+        echo -e "  ${GREEN}✓ Cleaned up${NC}"
+    fi
+fi
+
+################################################################################
+# Summary
+################################################################################
+
+echo ""
+if [ "$CHECK_ONLY" = true ]; then
+    echo -e "${BLUE}This was a dry run. Run without --check to apply updates.${NC}"
+else
+    echo -e "${GREEN}✓ Cache refresh complete!${NC}"
+fi
+echo ""

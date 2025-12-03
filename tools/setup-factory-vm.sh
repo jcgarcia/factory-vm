@@ -368,13 +368,13 @@ SECRETS_SCRIPT
     
     # Copy utility scripts from lib/ (extracted from modules.ar)
     log_info "Installing utility scripts..."
-    for util_script in expand-data-disk.sh install-ansible.sh install-android-sdk.sh; do
+    for util_script in expand-data-disk.sh install-ansible.sh install-android-sdk.sh refresh-cache.sh; do
         if [ -f "${LIB_DIR}/${util_script}" ]; then
             cp "${LIB_DIR}/${util_script}" "${VM_DIR}/"
             chmod +x "${VM_DIR}/${util_script}"
         fi
     done
-    log_success "Utility scripts installed (expand-data-disk, install-ansible, install-android-sdk)"
+    log_success "Utility scripts installed (expand-data-disk, install-ansible, install-android-sdk, refresh-cache)"
     
     # Create convenience symlinks in ~/.scripts if it exists
     if [ -d "${HOME}/.scripts" ]; then
