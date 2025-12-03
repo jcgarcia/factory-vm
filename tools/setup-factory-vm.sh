@@ -69,7 +69,7 @@ SSH_KEY_NAME="factory-foreman"
 
 # Disk configuration
 SYSTEM_DISK_SIZE="50G"
-CACHE_DISK_SIZE="50G"
+CACHE_DISK_SIZE="5G"
 DATA_DISK_SIZE="50G"
 SYSTEM_DISK="${VM_DIR}/${VM_NAME}.qcow2"
 CACHE_DISK="${VM_DIR}/${VM_NAME}-cache.qcow2"
@@ -366,6 +366,16 @@ fi
 SECRETS_SCRIPT
     chmod +x "${VM_DIR}/secrets-factory.sh"
     
+    # Copy utility scripts from lib/ (extracted from modules.ar)
+    log_info "Installing utility scripts..."
+    for util_script in expand-data-disk.sh install-ansible.sh install-android-sdk.sh; do
+        if [ -f "${LIB_DIR}/${util_script}" ]; then
+            cp "${LIB_DIR}/${util_script}" "${VM_DIR}/"
+            chmod +x "${VM_DIR}/${util_script}"
+        fi
+    done
+    log_success "Utility scripts installed (expand-data-disk, install-ansible, install-android-sdk)"
+    
     # Create convenience symlinks in ~/.scripts if it exists
     if [ -d "${HOME}/.scripts" ]; then
         log_info "Creating convenience links in ~/.scripts..."
@@ -539,6 +549,19 @@ ssh factory
 - Jenkins (https://factory.local)
 - Git, Node.js, Python, Java
 - jcscripts collection
+
+## Utility Scripts
+
+```bash
+# Expand data disk when you need more space
+./expand-data-disk.sh 100  # Expand to 100GB
+
+# Install Ansible (optional)
+./install-ansible.sh
+
+# Install Android SDK (optional)
+./install-android-sdk.sh
+```
 
 ## Credentials
 
