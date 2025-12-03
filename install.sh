@@ -25,11 +25,19 @@ echo ""
 mkdir -p "$REPO_DIR"
 cd "$REPO_DIR"
 
-# Preserve existing cache
+# Check for existing cache at correct location (~/.factory-vm/)
 CACHE_PRESERVED=0
-if [ -d "cache" ]; then
-    echo "→ Preserving existing cache..."
+PERSISTENT_CACHE_DIR="${HOME}/.factory-vm/cache"
+CACHE_DISK_BACKUP="${HOME}/.factory-vm/cache-backup.qcow2"
+
+if [ -d "$PERSISTENT_CACHE_DIR" ]; then
+    echo "→ Found existing cache at ~/.factory-vm/cache"
     CACHE_PRESERVED=1
+fi
+
+if [ -f "$CACHE_DISK_BACKUP" ]; then
+    echo "→ Found cache disk backup at ~/.factory-vm/cache-backup.qcow2"
+    echo "  This will be restored during installation"
 fi
 
 # Download latest scripts (always get fresh version)
@@ -68,9 +76,9 @@ rm -f lib/modules.ar  # Clean up archive after extraction
 
 echo "✓ Scripts and modules downloaded"
 
-# Notify about cache preservation
+# Notify about cache
 if [ $CACHE_PRESERVED -eq 1 ]; then
-    echo "✓ Local cache preserved and will be used"
+    echo "✓ Host cache will be used (~/.factory-vm/cache)"
 fi
 
 echo ""

@@ -11,7 +11,7 @@ install-jcscripts.sh/
 install-k8s-tools.sh/
 install-terraform.sh/
 
-/0              0           0     0     644     12428     `
+/0              0           0     0     644     12598     `
 #!/bin/bash
 # cache-manager.sh - Download and cache tools for Factory VM
 #
@@ -27,9 +27,12 @@ install-terraform.sh/
 # Configuration
 ################################################################################
 
-# Get script directory (tools/lib/) and set cache directory
+# Get script directory (tools/lib/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CACHE_DIR="$(dirname "$SCRIPT_DIR")/cache"
+
+# Use existing CACHE_DIR if set (from setup-factory-vm.sh), otherwise use local cache
+# This allows ~/.factory-vm/cache when called from installer, or tools/cache when standalone
+CACHE_DIR="${CACHE_DIR:-$(dirname "$SCRIPT_DIR")/cache}"
 
 # Tool versions - will be detected at runtime
 export TERRAFORM_VERSION="${TERRAFORM_VERSION:-}"
@@ -412,7 +415,7 @@ export -f download_and_cache_jenkins_image
 export -f cache_all_tools
 export -f download_and_cache_plugin
 export -f cache_all_plugins
-/18             0           0     0     644     10461     `
+/18             0           0     0     644     10966     `
 #!/bin/bash
 # install-jenkins.sh - Install Jenkins on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -681,12 +684,23 @@ else
     echo "  ⚠ Plugin installation had errors (Jenkins may still work)"
 fi
 
-# Start Jenkins container with volume mount
+# Start Jenkins container with volume mounts
+# - /opt/jenkins: Jenkins config, init scripts, plugins (system disk)
+# - /var/lib/jenkins: Job workspaces (data disk - preserved across reinstalls)
 echo "Starting Jenkins container..."
+
+# Remove any existing jenkins container (may exist from restored cache disk)
+if sudo docker ps -a --format '{{.Names}}' | grep -q '^jenkins$'; then
+    echo "  Removing existing jenkins container..."
+    sudo docker stop jenkins 2>/dev/null || true
+    sudo docker rm jenkins 2>/dev/null || true
+fi
+
 sudo docker run -d --name jenkins \
     --restart always \
     -p 8080:8080 -p 50000:50000 \
     -v /opt/jenkins:/var/jenkins_home \
+    -v /var/lib/jenkins:/var/jenkins_home/workspace \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e JAVA_OPTS="-Djenkins.install.runSetupWizard=false -Xmx2g" \
     -e JENKINS_FOREMAN_PASSWORD="${JENKINS_FOREMAN_PASSWORD}" \
@@ -708,7 +722,6 @@ EOF
 
 # Export functions
 export -f install_jenkins_via_ssh
-
 common.sh/      0           0     0     644     5464      `
 #!/bin/bash
 # common.sh - Shared utilities for Factory VM setup
@@ -1374,7 +1387,7 @@ install_certificates_on_host() {
 
 # Export functions
 export -f install_certificates_on_host
-/122            0           0     0     644     2150      `
+/122            0           0     0     644     2571      `
 #!/bin/bash
 # install-docker.sh - Install Docker on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -1394,6 +1407,19 @@ install_docker_via_ssh() {
         foreman@localhost << 'EOF'
 echo "Installing Docker..."
 sudo apk add docker docker-compose docker-cli-buildx
+
+echo "Configuring Docker to use cache disk..."
+# Configure Docker to store data on the cache disk (vdb)
+# This preserves images across reinstalls and keeps system disk small
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json > /dev/null << 'DAEMON_JSON'
+{
+    "data-root": "/var/cache/factory-build/docker"
+}
+DAEMON_JSON
+
+# Create the docker directory on cache disk
+sudo mkdir -p /var/cache/factory-build/docker
 
 echo "Configuring Docker service..."
 sudo rc-update add docker boot
@@ -1448,6 +1474,7 @@ EOF
 
 # Export functions
 export -f install_docker_via_ssh
+
 /141            0           0     0     644     1913      `
 #!/bin/bash
 # install-jcscripts.sh - Install jcscripts collection on Factory VM
@@ -1760,7 +1787,7 @@ fi
 # Export functions
 export -f setup_motd_via_ssh
 
-vm-bootstrap.sh/0           0     0     644     9360      `
+vm-bootstrap.sh/0           0     0     644     11041     `
 #!/bin/bash
 # vm-bootstrap.sh - Bootstrap Factory VM after Alpine installation
 # Part of Phase 3.5 modular architecture
@@ -1771,31 +1798,59 @@ if [ "${BASH_SOURCE[0]}" -ef "$0" ]; then
     exit 1
 fi
 
-setup_data_disk_in_vm() {
-    log "Setting up data disk for persistent cache..."
+setup_cache_disk_in_vm() {
+    log "Setting up cache disk (vdb) for build cache..."
     
-    # Check if data disk has a filesystem
+    # Check if cache disk has a filesystem
     if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -p "$VM_SSH_PORT" foreman@localhost "sudo blkid /dev/vdb" 2>/dev/null | grep -q "TYPE=\"ext4\""; then
         
-        log_info "Data disk not formatted - creating ext4 filesystem..."
+        log_info "Cache disk not formatted - creating ext4 filesystem..."
         ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -p "$VM_SSH_PORT" foreman@localhost "sudo mkfs.ext4 -F -L factory-cache /dev/vdb" >/dev/null 2>&1
         
-        log_success "Data disk formatted (ext4)"
+        log_success "Cache disk formatted (ext4)"
     else
-        log_info "Data disk already formatted (reusing preserved cache)"
+        log_info "Cache disk already formatted (reusing preserved cache)"
     fi
     
-    # Create mount point and mount data disk
+    # Create mount point and mount cache disk
     ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/cache/factory-build && sudo mount /dev/vdb /var/cache/factory-build && sudo chown -R foreman:foreman /var/cache/factory-build"
     
     # Add to fstab for auto-mount on boot
     ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        -p "$VM_SSH_PORT" foreman@localhost "echo '/dev/vdb /var/cache/factory-build ext4 defaults 0 2' | sudo tee -a /etc/fstab" >/dev/null
+        -p "$VM_SSH_PORT" foreman@localhost "grep -q '/dev/vdb' /etc/fstab || echo '/dev/vdb /var/cache/factory-build ext4 defaults 0 2' | sudo tee -a /etc/fstab" >/dev/null
     
-    log_success "Data disk mounted at /var/cache/factory-build"
+    log_success "Cache disk mounted at /var/cache/factory-build"
+}
+
+setup_data_disk_in_vm() {
+    log "Setting up data disk (vdc) for Jenkins workspaces..."
+    
+    # Check if data disk has a filesystem
+    if ! ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "sudo blkid /dev/vdc" 2>/dev/null | grep -q "TYPE=\"ext4\""; then
+        
+        log_info "Data disk not formatted - creating ext4 filesystem..."
+        ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$VM_SSH_PORT" foreman@localhost "sudo mkfs.ext4 -F -L factory-data /dev/vdc" >/dev/null 2>&1
+        
+        log_success "Data disk formatted (ext4)"
+    else
+        log_info "Data disk already formatted"
+    fi
+    
+    # Create mount point and mount data disk at /var/lib/jenkins
+    # Set ownership to UID 1000:1000 (jenkins user in container)
+    ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "sudo mkdir -p /var/lib/jenkins && sudo mount /dev/vdc /var/lib/jenkins && sudo chown -R 1000:1000 /var/lib/jenkins"
+    
+    # Add to fstab for auto-mount on boot
+    ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$VM_SSH_PORT" foreman@localhost "grep -q '/dev/vdc' /etc/fstab || echo '/dev/vdc /var/lib/jenkins ext4 defaults 0 2' | sudo tee -a /etc/fstab" >/dev/null
+    
+    log_success "Data disk mounted at /var/lib/jenkins"
 }
 
 configure_installed_vm() {
@@ -1992,7 +2047,10 @@ EOF
     # Give SSH/SCP a bit more time to fully stabilize after restart
     sleep 5
 
-    # Setup data disk for persistent cache
+    # Setup cache disk for persistent build cache (vdb)
+    setup_cache_disk_in_vm
+    
+    # Setup data disk for Jenkins workspaces (vdc)
     setup_data_disk_in_vm
     
     # Prepare cache directories
@@ -2027,8 +2085,9 @@ EOF
 }
 
 # Export functions
-export -f setup_data_disk_in_vm configure_installed_vm
-vm-lifecycle.sh/0           0     0     644     10931     `
+export -f setup_cache_disk_in_vm setup_data_disk_in_vm configure_installed_vm
+
+vm-lifecycle.sh/0           0     0     644     11209     `
 #!/bin/bash
 # vm-lifecycle.sh - VM creation and lifecycle management
 # Part of Phase 3.5 modular architecture
@@ -2188,21 +2247,29 @@ create_disks() {
         log "  ✓ System disk exists"
     fi
     
-    # Check for preserved data disk from previous test
-    local data_disk_backup="${HOME}/.factory-vm-data-backup.qcow2"
+    # Check for preserved cache disk from previous test
+    local cache_disk_backup="${HOME}/.factory-vm/cache-backup.qcow2"
     
-    if [ ! -f "$DATA_DISK" ]; then
-        # Check if we have a preserved data disk to restore
-        if [ -f "$data_disk_backup" ]; then
-            log_info "Restoring preserved data disk from previous installation..."
-            cp "$data_disk_backup" "$DATA_DISK"
-            rm -f "$data_disk_backup"
-            local size=$(du -h "$DATA_DISK" | cut -f1)
-            log_success "Data disk restored (${size}) - cache will be reused!"
+    if [ ! -f "$CACHE_DISK" ]; then
+        # Check if we have a preserved cache disk to restore
+        if [ -f "$cache_disk_backup" ]; then
+            log_info "Restoring preserved cache disk from previous installation..."
+            cp "$cache_disk_backup" "$CACHE_DISK"
+            rm -f "$cache_disk_backup"
+            local size=$(du -h "$CACHE_DISK" | cut -f1)
+            log_success "Cache disk restored (${size}) - cache will be reused!"
         else
-            qemu-img create -f qcow2 "$DATA_DISK" "$DATA_DISK_SIZE"
-            log "  ✓ Data disk created (${DATA_DISK_SIZE})"
+            qemu-img create -f qcow2 "$CACHE_DISK" "$CACHE_DISK_SIZE"
+            log "  ✓ Cache disk created (${CACHE_DISK_SIZE})"
         fi
+    else
+        log "  ✓ Cache disk exists"
+    fi
+    
+    # Create data disk for Jenkins workspaces
+    if [ ! -f "$DATA_DISK" ]; then
+        qemu-img create -f qcow2 "$DATA_DISK" "$DATA_DISK_SIZE"
+        log "  ✓ Data disk created (${DATA_DISK_SIZE})"
     else
         log "  ✓ Data disk exists"
     fi

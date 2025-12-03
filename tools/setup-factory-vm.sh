@@ -47,12 +47,14 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 if [ "$(basename "$SCRIPT_DIR")" = "factory-vm" ]; then
     # One-liner install: ~/factory-vm/setup-factory-vm.sh
     PROJECT_ROOT="$SCRIPT_DIR"
-    CACHE_DIR="${SCRIPT_DIR}/cache"
 else
     # Development/repo: ~/GitProjects/FactoryVM/FactoryVM/tools/setup-factory-vm.sh
     PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-    CACHE_DIR="${PROJECT_ROOT}/cache"
 fi
+
+# All Factory VM persistent data goes in ~/.factory-vm/
+# This ensures cache, backups, and credentials are in one place
+CACHE_DIR="${HOME}/.factory-vm/cache"
 
 VM_DIR="${HOME}/vms/factory"
 VM_NAME="factory"
@@ -67,21 +69,20 @@ SSH_KEY_NAME="factory-foreman"
 
 # Disk configuration
 SYSTEM_DISK_SIZE="50G"
+CACHE_DISK_SIZE="50G"
 DATA_DISK_SIZE="50G"
 SYSTEM_DISK="${VM_DIR}/${VM_NAME}.qcow2"
+CACHE_DISK="${VM_DIR}/${VM_NAME}-cache.qcow2"
 DATA_DISK="${VM_DIR}/${VM_NAME}-data.qcow2"
 
 # Alpine configuration
 ALPINE_VERSION="3.19"
 ALPINE_ARCH="aarch64"
 
-# Cache directory (shared with repository)
-CACHE_DIR="${PROJECT_ROOT}/cache"
-
 # Export variables for modules
 export SCRIPT_DIR PROJECT_ROOT VM_DIR VM_NAME VM_MEMORY VM_CPUS VM_SSH_PORT
 export VM_HOSTNAME VM_USERNAME SSH_KEY_NAME
-export SYSTEM_DISK_SIZE DATA_DISK_SIZE SYSTEM_DISK DATA_DISK
+export SYSTEM_DISK_SIZE CACHE_DISK_SIZE DATA_DISK_SIZE SYSTEM_DISK CACHE_DISK DATA_DISK
 export ALPINE_VERSION ALPINE_ARCH CACHE_DIR
 
 ################################################################################
@@ -135,6 +136,7 @@ offer_configuration_choice() {
     log "  Memory: ${VM_MEMORY}"
     log "  CPUs: ${VM_CPUS}"
     log "  System Disk: ${SYSTEM_DISK_SIZE}"
+    log "  Cache Disk: ${CACHE_DISK_SIZE}"
     log "  Data Disk: ${DATA_DISK_SIZE}"
     log ""
     
@@ -156,6 +158,7 @@ generate_start_script() {
 #!/bin/bash
 VM_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 SYSTEM_DISK="${SYSTEM_DISK}"
+CACHE_DISK="${CACHE_DISK}"
 DATA_DISK="${DATA_DISK}"
 UEFI_FW="${uefi_fw}"
 VM_MEMORY="${VM_MEMORY}"
@@ -197,6 +200,7 @@ sudo qemu-system-aarch64 \\
     -m \${VM_MEMORY} \\
     -bios \${UEFI_FW} \\
     -drive file="\${SYSTEM_DISK}",if=virtio,format=qcow2 \\
+    -drive file="\${CACHE_DISK}",if=virtio,format=qcow2 \\
     -drive file="\${DATA_DISK}",if=virtio,format=qcow2 \\
     -device virtio-net-pci,netdev=net0 \\
     -netdev user,id=net0,hostfwd=tcp::\${SSH_PORT}-:22,hostfwd=tcp::443-:443 \\
