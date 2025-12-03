@@ -587,7 +587,7 @@ Planned improvements:
 
 ## 📜 License
 
-MIT License - See LICENSE file for details
+MIT License - See [LICENSE](./LICENSE) file for details
 
 ## 🤝 Contributing
 
