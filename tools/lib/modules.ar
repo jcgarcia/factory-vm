@@ -418,7 +418,7 @@ export -f download_and_cache_jenkins_image
 export -f cache_all_tools
 export -f download_and_cache_plugin
 export -f cache_all_plugins
-/18             0           0     0     644     11296     `
+/18             0           0     0     644     10867     `
 #!/bin/bash
 # install-jenkins.sh - Install Jenkins on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -457,41 +457,38 @@ install_jenkins_via_ssh() {
 # Load Jenkins image
 if [ -f "/var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar" ]; then
     echo "Loading Jenkins Docker image from cache..."
-    # Load OCI archive format with skopeo (preserves tags)
-    if command -v skopeo &>/dev/null; then
-        sudo skopeo copy oci-archive:/var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar:lts-jdk21 docker-daemon:jenkins/jenkins:lts-jdk21
-    else
-        # Fallback to docker load (may not preserve tag)
-        sudo docker load -i /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
-    fi
     
-    # Verify the image was loaded correctly with the right tag
-    if ! sudo docker images jenkins/jenkins:lts-jdk21 | grep -q lts-jdk21; then
-        echo "⚠ Cached image doesn't have correct tag, re-downloading..."
-        sudo docker pull jenkins/jenkins:lts-jdk21
-        
-        # Update cache with new OCI format
-        echo "Updating cache with new image (OCI format)..."
-        sudo rm -f /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
-        if command -v skopeo &>/dev/null; then
-            sudo skopeo copy docker-daemon:jenkins/jenkins:lts-jdk21 oci-archive:/var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar:lts-jdk21
+    # Try docker load first (works with both formats, just may not preserve tag)
+    sudo docker load -i /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar 2>/dev/null
+    
+    # Check if image loaded with correct tag
+    if sudo docker images jenkins/jenkins:lts-jdk21 --format '{{.Repository}}:{{.Tag}}' | grep -q 'jenkins/jenkins:lts-jdk21'; then
+        echo "✓ Jenkins image loaded from cache with correct tag"
+    else
+        # Image loaded but without tag - find the image ID and tag it
+        LOADED_ID=$(sudo docker images --format '{{.ID}} {{.Repository}}' | grep -E '<none>|jenkins' | head -1 | awk '{print $1}')
+        if [ -n "$LOADED_ID" ]; then
+            echo "  Tagging loaded image as jenkins/jenkins:lts-jdk21..."
+            sudo docker tag "$LOADED_ID" jenkins/jenkins:lts-jdk21
+            if sudo docker images jenkins/jenkins:lts-jdk21 --format '{{.Repository}}:{{.Tag}}' | grep -q 'jenkins/jenkins:lts-jdk21'; then
+                echo "✓ Jenkins image tagged successfully"
+            else
+                echo "⚠ Could not tag image, re-downloading..."
+                sudo docker pull jenkins/jenkins:lts-jdk21
+            fi
         else
-            sudo docker save jenkins/jenkins:lts-jdk21 -o /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
+            echo "⚠ Cached image failed to load, re-downloading..."
+            sudo docker pull jenkins/jenkins:lts-jdk21
         fi
-        sudo chown foreman:foreman /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
     fi
 else
     echo "Pulling Jenkins Docker image from Docker Hub (this may take several minutes)..."
     sudo docker pull jenkins/jenkins:lts-jdk21
     
-    # Save to cache for next time (OCI format preserves tags)
-    echo "Saving Jenkins image to cache (OCI format)..."
+    # Save to cache for next time
+    echo "Saving Jenkins image to cache..."
     sudo mkdir -p /var/cache/factory-build/jenkins
-    if command -v skopeo &>/dev/null; then
-        sudo skopeo copy docker-daemon:jenkins/jenkins:lts-jdk21 oci-archive:/var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar:lts-jdk21
-    else
-        sudo docker save jenkins/jenkins:lts-jdk21 -o /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
-    fi
+    sudo docker save jenkins/jenkins:lts-jdk21 -o /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
     sudo chown foreman:foreman /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar
 fi
 
@@ -674,19 +671,16 @@ PLUGINS_LIST
 # This downloads plugins WITH all their dependencies to /opt/jenkins/plugins
 echo "  Running jenkins-plugin-cli to install plugins and dependencies..."
 echo "  (This downloads ~400MB of plugins, please be patient...)"
+echo ""
 sudo docker run --rm \
     -v /opt/jenkins:/var/jenkins_home \
     -v /tmp/plugins.txt:/plugins.txt \
     jenkins/jenkins:lts-jdk21 \
-    jenkins-plugin-cli --plugin-file /plugins.txt --plugin-download-directory /var/jenkins_home/plugins 2>&1 | \
-    while IFS= read -r line; do
-        # Show progress - plugin names and download progress
-        if echo "$line" | grep -qE 'Installing|Downloading|Done|downloaded|Plugin|Resolving'; then
-            echo "    $line"
-        fi
-    done
+    jenkins-plugin-cli --plugin-file /plugins.txt --plugin-download-directory /var/jenkins_home/plugins
+PLUGIN_EXIT=$?
+echo ""
 
-if [ ${PIPESTATUS[0]} -eq 0 ]; then
+if [ $PLUGIN_EXIT -eq 0 ]; then
     echo "  ✓ Plugins installed successfully"
     # Fix ownership after plugin installation
     sudo chown -R 1000:1000 /opt/jenkins/plugins
@@ -732,6 +726,7 @@ EOF
 
 # Export functions
 export -f install_jenkins_via_ssh
+
 common.sh/      0           0     0     644     5464      `
 #!/bin/bash
 # common.sh - Shared utilities for Factory VM setup
@@ -1076,7 +1071,7 @@ EOF
 
 # Export functions
 export -f install_aws_cli_via_ssh
-install-base.sh/0           0     0     644     2830      `
+install-base.sh/0           0     0     644     2823      `
 #!/bin/bash
 # install-base.sh - Install base packages on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -1143,7 +1138,7 @@ sudo apk add \
     bash curl wget git vim nano openssh-client sudo \
     ca-certificates openssl gnupg tar gzip unzip bzip2 xz \
     coreutils findutils grep sed make gcc g++ musl-dev \
-    python3 py3-pip nodejs npm openjdk21 skopeo
+    python3 py3-pip nodejs npm openjdk21
 
 echo "✓ Base packages installed"
 EOF
@@ -1158,6 +1153,7 @@ EOF
 
 # Export functions
 export -f install_base_packages_via_ssh
+
 /79             0           0     0     644     2644      `
 #!/bin/bash
 # install-caddy.sh - Install Caddy reverse proxy on Factory VM
