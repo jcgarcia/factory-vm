@@ -418,7 +418,7 @@ export -f download_and_cache_jenkins_image
 export -f cache_all_tools
 export -f download_and_cache_plugin
 export -f cache_all_plugins
-/18             0           0     0     644     10867     `
+/18             0           0     0     644     12804     `
 #!/bin/bash
 # install-jenkins.sh - Install Jenkins on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -432,19 +432,31 @@ fi
 install_jenkins_via_ssh() {
     log_info "Installing Jenkins via SSH..."
     
-    # Check if Jenkins image is cached on data disk
-    local jenkins_cached=0
+    # Check if Jenkins image is already loaded in Docker (survives if cache disk preserved)
+    local jenkins_in_docker=0
+    local jenkins_tar_cached=0
+    
+    # First check: is the image already loaded in Docker?
     if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar" 2>/dev/null; then
-        jenkins_cached=1
-        log_info "  ✓ Jenkins image already cached on data disk (skipping 475MB copy - saves ~1 minute!)"
-    elif [ -f "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" ]; then
-        log_info "  Copying Jenkins Docker image from host cache (475MB, this may take a minute)..."
-        scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" \
-            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" \
-            foreman@localhost:/var/cache/factory-build/jenkins/
-        jenkins_cached=1
+        -p "$VM_SSH_PORT" foreman@localhost "sudo docker images jenkins/jenkins:lts-jdk21 --format '{{.Repository}}' | grep -q jenkins" 2>/dev/null; then
+        jenkins_in_docker=1
+        log_info "  ✓ Jenkins image already in Docker (skipping copy and load)"
+    fi
+    
+    # Second check: is the tar file on VM cache disk?
+    if [ $jenkins_in_docker -eq 0 ]; then
+        if ssh -i "$VM_SSH_PRIVATE_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$VM_SSH_PORT" foreman@localhost "test -f /var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar" 2>/dev/null; then
+            jenkins_tar_cached=1
+            log_info "  ✓ Jenkins image tar on cache disk (will load into Docker)"
+        elif [ -f "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" ]; then
+            log_info "  Copying Jenkins Docker image from host cache (475MB, this may take a minute)..."
+            scp -i "$VM_SSH_PRIVATE_KEY" -P "$VM_SSH_PORT" \
+                -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                "${CACHE_DIR}/jenkins/jenkins-lts-jdk21.tar" \
+                foreman@localhost:/var/cache/factory-build/jenkins/
+            jenkins_tar_cached=1
+        fi
     fi
     
     # Install Jenkins - Phase 2 approach: create config BEFORE starting container
@@ -453,9 +465,11 @@ install_jenkins_via_ssh() {
     ssh -i "$VM_SSH_PRIVATE_KEY" -p "$VM_SSH_PORT" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o ConnectTimeout=60 -o ServerAliveInterval=30 \
-        foreman@localhost "export JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}'; bash -s" << 'EOF'
-# Load Jenkins image
-if [ -f "/var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar" ]; then
+        foreman@localhost "export JENKINS_FOREMAN_PASSWORD='${JENKINS_FOREMAN_PASSWORD}'; export JENKINS_IN_DOCKER='${jenkins_in_docker}'; bash -s" << 'EOF'
+# Load Jenkins image (skip if already in Docker)
+if [ "$JENKINS_IN_DOCKER" = "1" ]; then
+    echo "✓ Jenkins image already loaded in Docker (skipping load)"
+elif [ -f "/var/cache/factory-build/jenkins/jenkins-lts-jdk21.tar" ]; then
     echo "Loading Jenkins Docker image from cache..."
     
     # Try docker load first (works with both formats, just may not preserve tag)
@@ -669,23 +683,40 @@ PLUGINS_LIST
 
 # Run jenkins-plugin-cli in a temporary container to install plugins
 # This downloads plugins WITH all their dependencies to /opt/jenkins/plugins
-echo "  Running jenkins-plugin-cli to install plugins and dependencies..."
-echo "  (This downloads ~400MB of plugins, please be patient...)"
-echo ""
-sudo docker run --rm \
-    -v /opt/jenkins:/var/jenkins_home \
-    -v /tmp/plugins.txt:/plugins.txt \
-    jenkins/jenkins:lts-jdk21 \
-    jenkins-plugin-cli --plugin-file /plugins.txt --plugin-download-directory /var/jenkins_home/plugins
-PLUGIN_EXIT=$?
-echo ""
 
-if [ $PLUGIN_EXIT -eq 0 ]; then
-    echo "  ✓ Plugins installed successfully"
-    # Fix ownership after plugin installation
+# Check if plugins are already cached on the cache disk
+if [ -d "/var/cache/factory-build/jenkins/plugins" ] && [ "$(ls -A /var/cache/factory-build/jenkins/plugins 2>/dev/null | wc -l)" -gt 50 ]; then
+    echo "Restoring Jenkins plugins from cache disk (~200 plugins, saves ~400MB download)..."
+    sudo mkdir -p /opt/jenkins/plugins
+    sudo cp -r /var/cache/factory-build/jenkins/plugins/* /opt/jenkins/plugins/
     sudo chown -R 1000:1000 /opt/jenkins/plugins
+    echo "  ✓ $(ls /opt/jenkins/plugins/*.jpi 2>/dev/null | wc -l) plugins restored from cache"
 else
-    echo "  ⚠ Plugin installation had errors (Jenkins may still work)"
+    echo "  Running jenkins-plugin-cli to install plugins and dependencies..."
+    echo "  (First install downloads ~400MB of plugins, please be patient...)"
+    echo ""
+    sudo docker run --rm \
+        -v /opt/jenkins:/var/jenkins_home \
+        -v /tmp/plugins.txt:/plugins.txt \
+        jenkins/jenkins:lts-jdk21 \
+        jenkins-plugin-cli --plugin-file /plugins.txt --plugin-download-directory /var/jenkins_home/plugins 2>&1
+    PLUGIN_EXIT=$?
+    echo ""
+
+    if [ $PLUGIN_EXIT -eq 0 ]; then
+        echo "  ✓ Plugins installed successfully"
+        # Fix ownership after plugin installation
+        sudo chown -R 1000:1000 /opt/jenkins/plugins
+        
+        # Cache plugins to cache disk for future reinstalls
+        echo "  Saving plugins to cache disk for future installs..."
+        sudo mkdir -p /var/cache/factory-build/jenkins/plugins
+        sudo cp -r /opt/jenkins/plugins/* /var/cache/factory-build/jenkins/plugins/
+        sudo chown -R foreman:foreman /var/cache/factory-build/jenkins/plugins
+        echo "  ✓ $(ls /opt/jenkins/plugins/*.jpi 2>/dev/null | wc -l) plugins cached"
+    else
+        echo "  ⚠ Plugin installation had errors (Jenkins may still work)"
+    fi
 fi
 
 # Start Jenkins container with volume mounts
@@ -726,7 +757,6 @@ EOF
 
 # Export functions
 export -f install_jenkins_via_ssh
-
 common.sh/      0           0     0     644     5464      `
 #!/bin/bash
 # common.sh - Shared utilities for Factory VM setup
