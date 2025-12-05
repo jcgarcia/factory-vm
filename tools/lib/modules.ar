@@ -2138,7 +2138,7 @@ EOF
 # Export functions
 export -f setup_cache_disk_in_vm setup_data_disk_in_vm configure_installed_vm
 
-vm-lifecycle.sh/0           0     0     644     11209     `
+vm-lifecycle.sh/0           0     0     644     11389     `
 #!/bin/bash
 # vm-lifecycle.sh - VM creation and lifecycle management
 # Part of Phase 3.5 modular architecture
@@ -2434,15 +2434,17 @@ start_vm_for_install() {
     export QEMU_COMMAND="$qemu_cmd"
     
     # Run automated installation using external expect script (in parent tools/ directory)
-    if ! expect "$(dirname "$SCRIPT_DIR")/alpine-install.exp"; then
+    # Filter output to remove terminal escape sequences that can corrupt the terminal
+    # The ^[[...R sequences are cursor position responses from the VM's terminal
+    if ! expect "$(dirname "$SCRIPT_DIR")/alpine-install.exp" 2>&1 | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/;[0-9]*R//g'; then
         # Reset terminal in case expect left it in a bad state
-        reset 2>/dev/null || stty sane 2>/dev/null || true
+        stty sane 2>/dev/null || true
         log_error "Alpine installation failed"
         exit 1
     fi
     
     # Reset terminal to clean state after expect/QEMU
-    reset 2>/dev/null || stty sane 2>/dev/null || true
+    stty sane 2>/dev/null || true
     
     log ""
     log "✓ Alpine installation complete"
