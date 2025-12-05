@@ -1152,7 +1152,7 @@ EOF
 # Export functions
 export -f install_base_packages_via_ssh
 
-/79             0           0     0     644     1954      `
+/79             0           0     0     644     2644      `
 #!/bin/bash
 # install-caddy.sh - Install Caddy reverse proxy on Factory VM
 # Part of Phase 3.5 modular architecture
@@ -1203,6 +1203,22 @@ sudo chmod 644 /etc/caddy/Caddyfile
 echo "Starting Caddy service..."
 sudo rc-update add caddy boot
 sudo service caddy start
+
+# Create hourly certificate renewal check (handles laptop suspend/resume)
+cat << 'CRON_EOF' | sudo tee /etc/periodic/hourly/renew-caddy-cert > /dev/null
+#!/bin/sh
+# Check if Caddy certificate is expired or expiring soon (within 1 hour)
+CERT_FILE="/var/lib/caddy/.local/share/caddy/certificates/local/factory.local/factory.local.crt"
+
+if [ -f "$CERT_FILE" ]; then
+    # Check if cert expires within 3600 seconds (1 hour)
+    if ! openssl x509 -in "$CERT_FILE" -noout -checkend 3600 2>/dev/null; then
+        logger -t caddy-cert "Certificate expired or expiring soon, restarting Caddy"
+        rc-service caddy restart
+    fi
+fi
+CRON_EOF
+sudo chmod +x /etc/periodic/hourly/renew-caddy-cert
 
 sleep 2
 

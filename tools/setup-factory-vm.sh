@@ -249,6 +249,7 @@ EOF
 # Check Factory VM Status
 #
 # Shows if the VM is running, accessible, and what services are available
+# Automatically renews SSL certificate if expired (after laptop suspend, etc.)
 #
 ################################################################################
 
@@ -308,15 +309,10 @@ echo ""
 echo -n "SSH (port 2222): "
 if nc -z localhost 2222 2>/dev/null; then
     echo -e "${GREEN}✓ accessible${NC}"
-    
-    # Try actual SSH connection
-    if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 root@localhost "echo OK" >/dev/null 2>&1; then
-        echo "  Connection: working"
-    else
-        echo -e "  ${YELLOW}Connection: port open but authentication may be needed${NC}"
-    fi
+    SSH_OK=true
 else
     echo -e "${RED}✗ not accessible${NC}"
+    SSH_OK=false
 fi
 
 # Check HTTPS (port 443)
@@ -335,21 +331,53 @@ else
 fi
 
 echo ""
+
+# Check SSL certificate status and auto-renew if expired
+if [ "$SSH_OK" = true ]; then
+    echo -n "SSL Certificate: "
+    CERT_FILE="/var/lib/caddy/.local/share/caddy/certificates/local/factory.local/factory.local.crt"
+    
+    # Check if cert is valid (not expired)
+    if ssh factory "doas openssl x509 -in $CERT_FILE -noout -checkend 0" >/dev/null 2>&1; then
+        # Cert is valid, check if expiring within 1 hour
+        if ssh factory "doas openssl x509 -in $CERT_FILE -noout -checkend 3600" >/dev/null 2>&1; then
+            # Cert valid for more than 1 hour
+            EXPIRY=$(ssh factory "doas openssl x509 -in $CERT_FILE -noout -enddate 2>/dev/null | cut -d= -f2")
+            echo -e "${GREEN}✓ valid${NC}"
+            echo "  Expires: $EXPIRY"
+        else
+            # Cert expiring within 1 hour
+            echo -e "${YELLOW}⚠ expiring soon - renewing...${NC}"
+            ssh factory "doas rc-service caddy restart" >/dev/null 2>&1
+            sleep 2
+            echo -e "  ${GREEN}✓ Certificate renewed${NC}"
+        fi
+    else
+        # Cert is expired
+        echo -e "${RED}✗ expired - renewing...${NC}"
+        ssh factory "doas rc-service caddy restart" >/dev/null 2>&1
+        sleep 2
+        echo -e "  ${GREEN}✓ Certificate renewed${NC}"
+    fi
+    
+    echo ""
+fi
+
 echo "Services:"
 echo "  SSH:     ssh factory"
 echo "  Jenkins: https://factory.local"
 echo ""
 
 # Check VM resources if SSH is available
-if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 foreman@localhost "echo OK" >/dev/null 2>&1; then
+if [ "$SSH_OK" = true ]; then
     echo "VM Resources:"
-    ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 foreman@localhost "free -h | grep Mem" 2>/dev/null | awk '{print "  Memory: "$3" used / "$2" total"}'
-    ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 foreman@localhost "df -h / | tail -1" 2>/dev/null | awk '{print "  Disk:   "$3" used / "$2" total ("$5" full)"}'
+    ssh factory "free -h | grep Mem" 2>/dev/null | awk '{print "  Memory: "$3" used / "$2" total"}'
+    ssh factory "df -h / | tail -1" 2>/dev/null | awk '{print "  Disk:   "$3" used / "$2" total ("$5" full)"}'
     
     # Check Docker containers
     echo ""
     echo "Docker Containers:"
-    ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 foreman@localhost "sudo docker ps --format 'table {{.Names}}\t{{.Status}}'" 2>/dev/null || echo -e "  ${YELLOW}Docker not accessible${NC}"
+    ssh factory "sudo docker ps --format 'table {{.Names}}\t{{.Status}}'" 2>/dev/null || echo -e "  ${YELLOW}Docker not accessible${NC}"
 fi
 EOF
 
