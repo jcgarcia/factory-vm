@@ -407,6 +407,14 @@ SECRETS_SCRIPT
     done
     log_success "Utility scripts installed (expand-data-disk, install-ansible, install-android-sdk, refresh-cache)"
     
+    # Copy uninstall script from tools directory
+    local uninstall_script="${SCRIPT_DIR}/uninstall-factory-vm.sh"
+    if [ -f "${uninstall_script}" ]; then
+        cp "${uninstall_script}" "${VM_DIR}/"
+        chmod +x "${VM_DIR}/uninstall-factory-vm.sh"
+        log_success "Uninstall script installed"
+    fi
+    
     # Create convenience symlinks in ~/.scripts if it exists
     if [ -d "${HOME}/.scripts" ]; then
         log_info "Creating convenience links in ~/.scripts..."
@@ -414,7 +422,10 @@ SECRETS_SCRIPT
         ln -sf "${VM_DIR}/stop-factory.sh" "${HOME}/.scripts/factorystop"
         ln -sf "${VM_DIR}/status-factory.sh" "${HOME}/.scripts/factorystatus"
         ln -sf "${VM_DIR}/secrets-factory.sh" "${HOME}/.scripts/factorysecrets"
-        log_success "Created: factorystart, factorystop, factorystatus, factorysecrets"
+        if [ -f "${VM_DIR}/uninstall-factory-vm.sh" ]; then
+            ln -sf "${VM_DIR}/uninstall-factory-vm.sh" "${HOME}/.scripts/factoryuninstall"
+        fi
+        log_success "Created: factorystart, factorystop, factorystatus, factorysecrets, factoryuninstall"
     fi
     
     log_success "VM management scripts created"
