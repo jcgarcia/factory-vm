@@ -32,7 +32,7 @@ A dedicated Jenkins user named `foreman` is created with the following propertie
 | Property | Value |
 |----------|-------|
 | **Username** | `foreman` |
-| **Password** | `foreman123` |
+| **Password** | `use getsecrets to retrieve the password` |
 | **Permissions** | Full administrative access |
 | **API Token** | Auto-generated during installation |
 | **Token Name** | `CLI Access` |
